@@ -621,7 +621,7 @@ async function cerrarSesion() {
   await supabase.auth.signOut();
   window.location.href = "/login";
 }
-  const [vista, setVista] = useState<"entreno" | "historial" | "progreso" | "rutinas" | "biblioteca" | "calendario" | "ajustes">("entreno");
+  const [vista, setVista] = useState<"inicio" | "entreno" | "historial" | "progreso" | "rutinas" | "biblioteca" | "calendario" | "ajustes">("inicio");
   const [rutinas, setRutinas] = useState<Routine[]>(clone(DEFAULT_ROUTINES));
   const [rutinaActualId, setRutinaActualId] = useState(DEFAULT_ROUTINES[0].id);
   const [diaActualIndex, setDiaActualIndex] = useState(0);
@@ -641,7 +641,7 @@ async function cerrarSesion() {
   const [variantes, setVariantes] = useState<VariantesV2>({});
   const [alternativasAbiertas, setAlternativasAbiertas] = useState<Record<string, boolean>>({});
   const [modoAlternativa, setModoAlternativa] = useState<Record<string, "patron" | "musculo">>({});
-  const [inicioEntreno] = useState(() => Date.now());
+  const [inicioEntreno, setInicioEntreno] = useState<number | null>(null);
   const [segundos, setSegundos] = useState(0);
   const [descansoRestante, setDescansoRestante] = useState(0);
   const [ajustes, setAjustes] = useState<Ajustes>({ descanso: 90, mostrarComparacion: true, mostrarRir: true });
@@ -709,9 +709,18 @@ async function cerrarSesion() {
   }, [router, supabase]);
 
   useEffect(() => {
+    if (inicioEntreno === null) return;
     const t = window.setInterval(() => setSegundos(Math.floor((Date.now() - inicioEntreno) / 1000)), 1000);
     return () => window.clearInterval(t);
   }, [inicioEntreno]);
+
+  const abrirEntrenamiento = () => {
+    if (inicioEntreno === null) {
+      setInicioEntreno(Date.now());
+      setSegundos(0);
+    }
+    setVista("entreno");
+  };
 
   useEffect(() => {
     if (descansoRestante <= 0) return;
@@ -931,7 +940,7 @@ async function cerrarSesion() {
       if (n >= rutinaActual.dias.length) return 0;
       return n;
     });
-    setVista("entreno");
+    abrirEntrenamiento();
   };
 
   const actualizarRutina = (rutinaId: string, updater: (r: Routine) => Routine) => {
@@ -1109,7 +1118,7 @@ async function cerrarSesion() {
     if (!rut) return;
     setRutinaActualId(rut.id);
     setDiaActualIndex(Math.min(entry.diaIndex, Math.max(0, rut.dias.length - 1)));
-    setVista("entreno");
+    abrirEntrenamiento();
   };
 
   const diasDelMes = useMemo(() => {
@@ -1155,8 +1164,9 @@ async function cerrarSesion() {
         .vf-toolbar{display:flex;gap:10px;flex-wrap:wrap;margin-bottom:14px}.vf-primary,.vf-secondary,.vf-danger{border-radius:10px;padding:10px 13px;font-weight:900;cursor:pointer}.vf-primary{border:1px solid #f03261;background:linear-gradient(90deg,#0b4b99,#7a0d50,#a50044);color:#F6C344}.vf-secondary{border:1px solid #31577e;background:#08172d;color:#dce7f4}.vf-danger{border:1px solid #7f2940;background:#2a0815;color:#ff9bad}.vf-routines{display:grid;grid-template-columns:repeat(2,minmax(0,1fr));gap:14px}.vf-routine-day{border:1px solid #2e5c8d;border-radius:16px;background:rgba(4,17,38,.78);padding:16px}.vf-routine-day h3{color:#F6C344;margin:0 0 4px}.vf-routine-list{margin:12px 0 0;padding:0;list-style:none}.vf-routine-list li{padding:8px 0;border-top:1px solid rgba(66,94,125,.22);font-size:12px}
         .vf-editor{border:1px solid #F6C344;background:rgba(3,13,30,.88);border-radius:18px;padding:18px;margin-top:18px}.vf-editor-head{display:grid;grid-template-columns:1fr 1fr;gap:10px}.vf-text{width:100%;background:#07172b;border:1px solid #31577e;color:white;border-radius:9px;padding:10px;outline:none}.vf-day-tabs{display:flex;gap:8px;flex-wrap:wrap;margin:14px 0}.vf-day-tab{border:1px solid #31577e;background:#07172b;color:#dce7f4;border-radius:9px;padding:9px 12px;cursor:pointer}.vf-day-tab.active{border-color:#F6C344;color:#F6C344}.vf-edit-ex{display:grid;grid-template-columns:36px minmax(180px,1fr) 90px 90px 80px auto;gap:8px;align-items:center;padding:10px 0;border-top:1px solid rgba(66,94,125,.22)}.vf-edit-ex:first-of-type{border-top:0}.vf-edit-controls{display:flex;gap:4px}.vf-edit-controls button{border:1px solid #31577e;background:#07172b;color:#dce7f4;border-radius:7px;padding:7px;cursor:pointer}
         .vf-library-head{display:grid;grid-template-columns:2fr repeat(3,1fr);gap:9px;margin-bottom:12px}.vf-library-grid{display:grid;grid-template-columns:repeat(3,minmax(0,1fr));gap:10px}.vf-lib-card{border:1px solid #294f75;background:linear-gradient(135deg,rgba(4,25,56,.82),rgba(26,5,26,.72));border-radius:13px;padding:12px}.vf-lib-card h3{font-size:14px;margin:0 0 6px}.vf-lib-meta{font-size:10px;color:#9aabc0;line-height:1.5}.vf-lib-card button{margin-top:9px;width:100%}.vf-lib-count{color:#F6C344;font-weight:900;margin:0 0 12px}.vf-custom-form{display:grid;grid-template-columns:2fr 1fr 1fr 1fr 1fr;gap:8px;margin:12px 0}.vf-setting{display:flex;justify-content:space-between;align-items:center;gap:16px;padding:14px 0;border-bottom:1px solid rgba(66,94,125,.25)}.vf-setting:last-child{border-bottom:0}.vf-setting select,.vf-setting button{background:#09192f;color:white;border:1px solid #31577e;border-radius:9px;padding:9px 12px}
-        .vf-bottom{position:fixed;left:50%;transform:translateX(-50%);bottom:12px;z-index:20;width:min(calc(100% - 24px),1100px);display:grid;grid-template-columns:repeat(7,1fr);border:1px solid #1a63a9;background:rgba(1,10,24,.94);backdrop-filter:blur(14px);border-radius:14px;overflow:hidden;box-shadow:0 14px 40px rgba(0,0,0,.45)}.vf-nav{min-height:64px;border:0;border-right:1px solid rgba(52,89,129,.32);background:transparent;color:#d5dfeb;cursor:pointer;font-size:10px;font-weight:800}.vf-nav:last-child{border-right:0}.vf-nav span{display:block;font-size:20px;margin-bottom:4px}.vf-nav.active{color:#F6C344;background:linear-gradient(180deg,rgba(12,63,118,.24),rgba(165,0,68,.16));box-shadow:inset 0 -3px 0 #F6C344}.vf-home{display:inline-block;color:#9aabc0;text-decoration:none;font-size:11px;margin:4px 0 84px}
-        .vf-calendar-top{display:grid;grid-template-columns:1fr auto;gap:14px;align-items:end;margin-bottom:14px}.vf-calendar-controls{display:grid;grid-template-columns:1fr 1fr;gap:10px}.vf-calendar-month{display:flex;align-items:center;gap:10px}.vf-calendar-month button{width:42px;height:42px;border-radius:10px;border:1px solid #31577e;background:#09192f;color:#F6C344;cursor:pointer;font-size:20px}.vf-calendar-title{font-size:22px;font-weight:1000;color:#F6C344;text-transform:capitalize}.vf-calendar-stats{display:grid;grid-template-columns:repeat(3,1fr);gap:10px;margin-bottom:14px}.vf-calendar-stat{border:1px solid #294f75;background:rgba(3,13,30,.78);border-radius:13px;padding:12px;text-align:center}.vf-calendar-stat strong{display:block;font-size:22px;color:#F6C344}.vf-calendar-week{display:grid;grid-template-columns:repeat(7,1fr);gap:6px;margin-bottom:6px}.vf-calendar-week div{text-align:center;color:#7f93aa;font-size:11px;font-weight:900;padding:6px}.vf-calendar-grid{display:grid;grid-template-columns:repeat(7,1fr);gap:6px}.vf-cal-day{min-height:112px;border:1px solid #22496f;background:rgba(4,17,38,.78);border-radius:12px;padding:9px;cursor:pointer;position:relative;transition:.15s}.vf-cal-day:hover{border-color:#F6C344;transform:translateY(-1px)}.vf-cal-day.empty{opacity:0;pointer-events:none}.vf-cal-day.today{box-shadow:inset 0 0 0 2px #F6C344}.vf-cal-day.planned{border-color:#1e72ca;background:linear-gradient(135deg,rgba(0,77,152,.28),rgba(4,17,38,.9))}.vf-cal-day.done{border-color:#38d996;background:linear-gradient(135deg,rgba(0,105,76,.28),rgba(4,17,38,.9))}.vf-cal-num{font-weight:1000;font-size:15px}.vf-cal-badge{margin-top:8px;font-size:10px;font-weight:900;color:#F6C344;line-height:1.35}.vf-cal-done{color:#57e7aa}.vf-cal-open{margin-top:8px;width:100%;border:1px solid #31577e;background:#071527;color:#dce7f4;border-radius:7px;padding:6px;font-size:9px;font-weight:900;cursor:pointer}.vf-calendar-help{color:#9aabc0;font-size:11px;line-height:1.55;margin:8px 0 16px}
+        .vf-start{display:grid;gap:16px;padding:12px 0 24px}.vf-start-hero{border:1px solid #6b5614;background:linear-gradient(135deg,rgba(246,195,68,.12),rgba(2,10,25,.82));border-radius:22px;padding:28px;text-align:center;box-shadow:0 18px 50px rgba(0,0,0,.28)}.vf-start-hero h1{margin:0;color:#F6C344;font-size:clamp(28px,6vw,48px);font-weight:1000}.vf-start-hero p{margin:10px 0 0;color:#a9bad0}.vf-start-grid{display:grid;grid-template-columns:repeat(2,minmax(0,1fr));gap:12px}.vf-start-card{border:1px solid #294f75;background:rgba(3,13,30,.82);border-radius:18px;padding:20px;text-align:left;color:#fff;cursor:pointer;min-height:118px}.vf-start-card strong{display:block;color:#F6C344;font-size:18px;margin:8px 0 5px}.vf-start-card span{color:#9fb0c5;font-size:12px;line-height:1.5}.vf-start-card .vf-start-icon{font-size:28px}.vf-start-card.primary{grid-column:1/-1;border-color:#F6C344;background:linear-gradient(135deg,rgba(246,195,68,.18),rgba(165,0,68,.12))}@media(max-width:650px){.vf-start-grid{grid-template-columns:1fr}.vf-start-card.primary{grid-column:auto}}
+        .vf-bottom{position:fixed;left:50%;transform:translateX(-50%);bottom:12px;z-index:20;width:min(calc(100% - 24px),1100px);display:grid;grid-template-columns:repeat(8,1fr);border:1px solid #1a63a9;background:rgba(1,10,24,.94);backdrop-filter:blur(14px);border-radius:14px;overflow:hidden;box-shadow:0 14px 40px rgba(0,0,0,.45)}.vf-nav{min-height:64px;border:0;border-right:1px solid rgba(52,89,129,.32);background:transparent;color:#d5dfeb;cursor:pointer;font-size:10px;font-weight:800}.vf-nav:last-child{border-right:0}.vf-nav span{display:block;font-size:20px;margin-bottom:4px}.vf-nav.active{color:#F6C344;background:linear-gradient(180deg,rgba(12,63,118,.24),rgba(165,0,68,.16));box-shadow:inset 0 -3px 0 #F6C344}.vf-home{display:inline-block;color:#9aabc0;text-decoration:none;font-size:11px;margin:4px 0 84px}
+        .vf-calendar-top{display:grid;grid-template-columns:1fr auto;gap:14px;align-items:end;margin-bottom:14px}.vf-calendar-controls{display:grid;grid-template-columns:1fr 1fr;gap:10px}.vf-calendar-month{display:flex;align-items:center;gap:10px}.vf-calendar-month button{width:42px;height:42px;border-radius:10px;border:1px solid #31577e;background:#09192f;color:#F6C344;cursor:pointer;font-size:20px}.vf-calendar-title{font-size:22px;font-weight:1000;color:#F6C344;text-transform:capitalize}.vf-calendar-stats{display:grid;grid-template-columns:repeat(3,1fr);gap:10px;margin-bottom:14px}.vf-calendar-stat{border:1px solid #294f75;background:rgba(3,13,30,.78);border-radius:13px;padding:12px;text-align:center}.vf-calendar-stat strong{display:block;font-size:22px;color:#F6C344}.vf-calendar-week{display:grid;grid-template-columns:repeat(8,1fr);gap:6px;margin-bottom:6px}.vf-calendar-week div{text-align:center;color:#7f93aa;font-size:11px;font-weight:900;padding:6px}.vf-calendar-grid{display:grid;grid-template-columns:repeat(8,1fr);gap:6px}.vf-cal-day{min-height:112px;border:1px solid #22496f;background:rgba(4,17,38,.78);border-radius:12px;padding:9px;cursor:pointer;position:relative;transition:.15s}.vf-cal-day:hover{border-color:#F6C344;transform:translateY(-1px)}.vf-cal-day.empty{opacity:0;pointer-events:none}.vf-cal-day.today{box-shadow:inset 0 0 0 2px #F6C344}.vf-cal-day.planned{border-color:#1e72ca;background:linear-gradient(135deg,rgba(0,77,152,.28),rgba(4,17,38,.9))}.vf-cal-day.done{border-color:#38d996;background:linear-gradient(135deg,rgba(0,105,76,.28),rgba(4,17,38,.9))}.vf-cal-num{font-weight:1000;font-size:15px}.vf-cal-badge{margin-top:8px;font-size:10px;font-weight:900;color:#F6C344;line-height:1.35}.vf-cal-done{color:#57e7aa}.vf-cal-open{margin-top:8px;width:100%;border:1px solid #31577e;background:#071527;color:#dce7f4;border-radius:7px;padding:6px;font-size:9px;font-weight:900;cursor:pointer}.vf-calendar-help{color:#9aabc0;font-size:11px;line-height:1.55;margin:8px 0 16px}
         @media(max-width:850px){.vf-topbar{grid-template-columns:1fr auto}.vf-day{grid-column:1/-1;grid-row:2;justify-content:center}.vf-actions{display:none}.vf-stats{grid-template-columns:1fr 1fr}.vf-stat:nth-child(3),.vf-stat:nth-child(4){border-top:1px solid rgba(84,124,165,.35)}.vf-stat:nth-child(3):before{display:none}.vf-progress-grid,.vf-routines,.vf-library-grid{grid-template-columns:1fr 1fr}.vf-library-head{grid-template-columns:1fr 1fr}.vf-custom-form{grid-template-columns:1fr 1fr}.vf-edit-ex{grid-template-columns:32px 1fr 75px 75px 65px}.vf-edit-controls{grid-column:2/-1}.vf-bottom{grid-template-columns:repeat(3,1fr)}}
         .vf-creatine-today{display:grid;grid-template-columns:1fr auto;gap:14px;align-items:center;border:1px solid rgba(56,217,150,.55);background:linear-gradient(135deg,rgba(2,70,48,.34),rgba(4,17,38,.88));border-radius:16px;padding:14px 16px;margin-bottom:16px;box-shadow:0 12px 28px rgba(0,0,0,.18)}.vf-creatine-today.pending{border-color:rgba(246,195,68,.58);background:linear-gradient(135deg,rgba(104,70,0,.22),rgba(4,17,38,.9))}.vf-creatine-title{font-size:13px;font-weight:1000;color:#F6C344;letter-spacing:.6px}.vf-creatine-status{font-size:21px;font-weight:1000;margin-top:4px;color:#57e7aa}.vf-creatine-today.pending .vf-creatine-status{color:#F6C344}.vf-creatine-button{border:1px solid #39c98e;background:linear-gradient(90deg,#087648,#0a9b5c);color:white;border-radius:10px;padding:11px 14px;font-weight:1000;cursor:pointer;white-space:nowrap}.vf-creatine-button.done{background:#071527;border-color:#31577e;color:#9fb1c7}.vf-creatine-summary{display:grid;grid-template-columns:repeat(4,1fr);gap:10px;margin:12px 0 16px}.vf-creatine-stat{border:1px solid #294f75;background:rgba(3,13,30,.78);border-radius:13px;padding:12px;text-align:center}.vf-creatine-stat strong{display:block;font-size:21px;color:#57e7aa}.vf-creatine-stat span{display:block;margin-top:3px}.vf-creatine-ring{width:92px;height:92px;border-radius:50%;margin:0 auto 8px;display:flex;align-items:center;justify-content:center;background:conic-gradient(#22c875 calc(var(--creatine-pct) * 1%),#10243d 0);position:relative}.vf-creatine-ring:after{content:"";position:absolute;inset:9px;background:#071327;border-radius:50%}.vf-creatine-ring strong{position:relative;z-index:1;font-size:22px;color:#fff}.vf-creatine-day{margin-top:7px;width:100%;border:1px solid #31577e;background:#071527;color:#9fb1c7;border-radius:7px;padding:5px 4px;font-size:9px;font-weight:900;cursor:pointer}.vf-creatine-day.taken{border-color:#25be76;background:rgba(7,112,67,.35);color:#77efb3}.vf-creatine-note{border:1px solid rgba(56,217,150,.34);background:rgba(4,40,30,.28);border-radius:12px;padding:12px 14px;color:#b8c8d9;font-size:11px;line-height:1.55;margin:12px 0 16px}
         @media(max-width:620px){.vf-creatine-today{grid-template-columns:1fr}.vf-creatine-button{width:100%}.vf-creatine-summary{grid-template-columns:1fr 1fr}.vf-app{padding:10px 8px 120px}.vf-brand-title{font-size:22px}.vf-logo{width:46px;height:46px}.vf-compare-grid{grid-template-columns:1fr}.vf-card-actions{grid-template-columns:1fr}.vf-alt-list,.vf-library-grid,.vf-progress-grid,.vf-routines{grid-template-columns:1fr}.vf-library-head,.vf-custom-form,.vf-editor-head{grid-template-columns:1fr}.vf-card-head{grid-template-columns:auto 1fr}.vf-ex-icon{display:none}.vf-ex-title{font-size:18px}.vf-series-row{grid-template-columns:28px repeat(3,minmax(0,1fr));gap:5px}.vf-panel{padding:10px 8px}.vf-bottom{bottom:6px}.vf-nav{min-height:54px;font-size:8px}.vf-nav span{font-size:17px}.vf-edit-ex{grid-template-columns:30px 1fr 58px 58px 58px;gap:5px}.vf-edit-ex .vf-text{padding:7px;font-size:11px}.vf-calendar-top{grid-template-columns:1fr}.vf-calendar-controls{grid-template-columns:1fr}.vf-calendar-stats{grid-template-columns:repeat(3,1fr)}.vf-cal-day{min-height:84px;padding:6px}.vf-cal-badge{font-size:8px}.vf-cal-open{display:none}}
@@ -1173,6 +1183,22 @@ async function cerrarSesion() {
           <div className="vf-actions"><button className="vf-icon-button" onClick={() => setVista("progreso")}>📈</button><button className="vf-icon-button" onClick={() => setVista("ajustes")}>☰</button></div>
         </header>
         <div className="vf-routine-name">{rutinaActual?.nombre} · {diaActual?.subtitulo}</div>
+
+        {vista === "inicio" && <>
+          <section className="vf-start">
+            <div className="vf-start-hero">
+              <h1>VITORFIT</h1>
+              <p>Elige qué quieres hacer. El entrenamiento no empieza hasta que tú pulses Entrenar.</p>
+            </div>
+            <div className="vf-start-grid">
+              <button className="vf-start-card primary" onClick={abrirEntrenamiento}><div className="vf-start-icon">🏋️</div><strong>EMPEZAR ENTRENAMIENTO</strong><span>{diaActual?.titulo} · {diaActual?.subtitulo}</span></button>
+              <button className="vf-start-card" onClick={()=>setVista("rutinas")}><div className="vf-start-icon">↕️</div><strong>ORDENAR EJERCICIOS</strong><span>Entra en Rutinas, abre cualquiera de tus 4 días y usa ↑ ↓ para cambiar solo el orden.</span></button>
+              <button className="vf-start-card" onClick={()=>setVista("progreso")}><div className="vf-start-icon">📈</div><strong>PROGRESO</strong><span>Consulta marcas, sesiones e historial de evolución.</span></button>
+              <button className="vf-start-card" onClick={()=>setVista("calendario")}><div className="vf-start-icon">📅</div><strong>CALENDARIO</strong><span>Planifica entrenamientos y registra tu creatina.</span></button>
+              <button className="vf-start-card" onClick={()=>setVista("historial")}><div className="vf-start-icon">🕘</div><strong>HISTORIAL</strong><span>Revisa tus entrenamientos anteriores.</span></button>
+            </div>
+          </section>
+        </>}
 
         {vista === "entreno" && diaActual && <>
           <section className="vf-stats">
@@ -1287,7 +1313,8 @@ async function cerrarSesion() {
         
       {mensaje&&<div className="vf-message" onClick={()=>setMensaje("")}>{mensaje}</div>}
       <nav className="vf-bottom">
-        <button className={`vf-nav ${vista==="entreno"?"active":""}`} onClick={()=>setVista("entreno")}><span>🏋️</span>ENTRENO</button>
+        <button className={`vf-nav ${vista==="inicio"?"active":""}`} onClick={()=>setVista("inicio")}><span>⌂</span>INICIO</button>
+        <button className={`vf-nav ${vista==="entreno"?"active":""}`} onClick={abrirEntrenamiento}><span>🏋️</span>ENTRENO</button>
         <button className={`vf-nav ${vista==="historial"?"active":""}`} onClick={()=>setVista("historial")}><span>🕘</span>HISTORIAL</button>
         <button className={`vf-nav ${vista==="progreso"?"active":""}`} onClick={()=>setVista("progreso")}><span>📈</span>PROGRESO</button>
         <button className={`vf-nav ${vista==="rutinas"?"active":""}`} onClick={()=>setVista("rutinas")}><span>📋</span>RUTINAS</button>
