@@ -611,6 +611,7 @@ const keyRoutineSelection = "vitorfit-rutina-activa-v3";
 const keyCalendario = "vitorfit-calendario-v1";
 const keyCreatina = "vitorfit-creatina-v1";
 const keyAnatomiaOverrides = "vitorfit-anatomia-overrides-v1";
+const keyUsuarioActual = "vitorfit-usuario-actual";
 
 const uid = (prefix: string) => `${prefix}-${Date.now()}-${Math.random().toString(36).slice(2, 8)}`;
 const clone = <T,>(value: T): T => JSON.parse(JSON.stringify(value));
@@ -639,6 +640,12 @@ async function cerrarSesion() {
 
   const [registros, setRegistros] = useState<RegistrosV2>({});
   const [historial, setHistorial] = useState<HistorialV2>({});
+  const historialPlano = Object.values(historial).flat();
+
+const ultimoRegistroHistorial =
+  historialPlano.length > 0
+    ? historialPlano[historialPlano.length - 1]
+    : null;
   const [variantes, setVariantes] = useState<VariantesV2>({});
   const [alternativasAbiertas, setAlternativasAbiertas] = useState<Record<string, boolean>>({});
   const [modoAlternativa, setModoAlternativa] = useState<Record<string, "patron" | "musculo">>({});
@@ -654,6 +661,8 @@ async function cerrarSesion() {
   const [diaPlanIndex, setDiaPlanIndex] = useState(0);
   const [creatina, setCreatina] = useState<CreatinaMap>({});
   const [userId, setUserId] = useState<string | null>(null);
+  const keyUsuario = (base: string) =>
+  userId ? `${base}-${userId}` : base;
   const [nubeLista, setNubeLista] = useState(false);
   const [anatomiaOverrides, setAnatomiaOverrides] = useState<Record<string, string>>({});
   const [editorAnatomiaId, setEditorAnatomiaId] = useState<string | null>(null);
@@ -735,74 +744,103 @@ async function cerrarSesion() {
   }, [descansoRestante]);
 
   useEffect(() => {
-    try {
-      const r = localStorage.getItem(keyRegistros);
-      const h = localStorage.getItem(keyHistorial);
-      const v = localStorage.getItem(keyVariantes);
-      const a = localStorage.getItem(keyAjustes);
-      const rr = localStorage.getItem(keyRutinas);
-      const cl = localStorage.getItem(keyCustomLibrary);
-      const sel = localStorage.getItem(keyRoutineSelection);
-      const cal = localStorage.getItem(keyCalendario);
-      const cr = localStorage.getItem(keyCreatina);
-      const ao = localStorage.getItem(keyAnatomiaOverrides);
+  if (!userId) return;
 
-      if (r) setRegistros(JSON.parse(r));
-      if (h) setHistorial(JSON.parse(h));
-      else {
-        const antiguo = localStorage.getItem("vitorfit-historial");
-        if (antiguo) {
-          const parsed = JSON.parse(antiguo) as Record<string, Array<{ fecha: string; nombre?: string; series: Serie[] }>>;
-          const migrado: HistorialV2 = {};
-          DEFAULT_ROUTINES[0].dias[0].ejercicios.forEach((ej, index) => {
-            const regs = parsed[String(index)] ?? [];
-            if (regs.length) {
-              migrado[ej.id] = regs.map((x) => ({ fecha: x.fecha, nombre: x.nombre ?? ej.nombre, variante: x.nombre ?? ej.nombre, patron: ej.patron, series: x.series }));
-            }
-          });
-          setHistorial(migrado);
-          localStorage.setItem(keyHistorial, JSON.stringify(migrado));
-        }
+  try {
+    const r = localStorage.getItem(keyUsuario(keyRegistros));
+    const h = localStorage.getItem(keyUsuario(keyHistorial));
+    const v = localStorage.getItem(keyUsuario(keyVariantes));
+    const a = localStorage.getItem(keyUsuario(keyAjustes));
+    const rr = localStorage.getItem(keyUsuario(keyRutinas));
+    const cl = localStorage.getItem(keyUsuario(keyCustomLibrary));
+    const sel = localStorage.getItem(keyUsuario(keyRoutineSelection));
+    const cal = localStorage.getItem(keyUsuario(keyCalendario));
+    const cr = localStorage.getItem(keyUsuario(keyCreatina));
+    const ao = localStorage.getItem(keyUsuario(keyAnatomiaOverrides));
+
+    if (r) setRegistros(JSON.parse(r));
+    if (h) setHistorial(JSON.parse(h));
+    if (v) setVariantes(JSON.parse(v));
+    if (a) setAjustes(JSON.parse(a));
+    if (rr) setRutinas(JSON.parse(rr));
+    if (cl) setBibliotecaPersonal(JSON.parse(cl));
+
+    if (sel) {
+      const s = JSON.parse(sel);
+
+      if (s.rutinaActualId) {
+        setRutinaActualId(s.rutinaActualId);
       }
-      if (v) setVariantes(JSON.parse(v));
-      if (a) setAjustes(JSON.parse(a));
-      if (rr) setRutinas(JSON.parse(rr));
-      if (cl) setBibliotecaPersonal(JSON.parse(cl));
-      if (sel) {
-        const s = JSON.parse(sel);
-        if (s.rutinaActualId) setRutinaActualId(s.rutinaActualId);
-        if (typeof s.diaActualIndex === "number") setDiaActualIndex(s.diaActualIndex);
+
+      if (typeof s.diaActualIndex === "number") {
+        setDiaActualIndex(s.diaActualIndex);
       }
-      if (cal) setCalendario(JSON.parse(cal));
-      if (cr) setCreatina(JSON.parse(cr));
-      if (ao) setAnatomiaOverrides(JSON.parse(ao));
-      if (!r) {
-        const antiguoRegistros = localStorage.getItem("vitorfit-registros");
-        if (antiguoRegistros) {
-          const parsed = JSON.parse(antiguoRegistros) as Record<string, Serie[]>;
-          const migrado: RegistrosV2 = {};
-          DEFAULT_ROUTINES[0].dias[0].ejercicios.forEach((ej, index) => {
-            if (parsed[String(index)]) migrado[ej.id] = parsed[String(index)];
-          });
-          setRegistros(migrado);
-          localStorage.setItem(keyRegistros, JSON.stringify(migrado));
-        }
-      }
-    } catch {
-      setMensaje("No pude leer algún dato antiguo, pero VitorFit puede seguir funcionando.");
     }
-  }, []);
 
-  useEffect(() => localStorage.setItem(keyRegistros, JSON.stringify(registros)), [registros]);
-  useEffect(() => localStorage.setItem(keyVariantes, JSON.stringify(variantes)), [variantes]);
-  useEffect(() => localStorage.setItem(keyAjustes, JSON.stringify(ajustes)), [ajustes]);
-  useEffect(() => localStorage.setItem(keyRutinas, JSON.stringify(rutinas)), [rutinas]);
-  useEffect(() => localStorage.setItem(keyCustomLibrary, JSON.stringify(bibliotecaPersonal)), [bibliotecaPersonal]);
-  useEffect(() => localStorage.setItem(keyRoutineSelection, JSON.stringify({ rutinaActualId, diaActualIndex })), [rutinaActualId, diaActualIndex]);
-  useEffect(() => localStorage.setItem(keyCalendario, JSON.stringify(calendario)), [calendario]);
-  useEffect(() => localStorage.setItem(keyCreatina, JSON.stringify(creatina)), [creatina]);
-  useEffect(() => localStorage.setItem(keyAnatomiaOverrides, JSON.stringify(anatomiaOverrides)), [anatomiaOverrides]);
+    if (cal) setCalendario(JSON.parse(cal));
+    if (cr) setCreatina(JSON.parse(cr));
+    if (ao) setAnatomiaOverrides(JSON.parse(ao));
 
+  } catch {
+    setMensaje(
+      "No pude leer los datos locales de este usuario, pero VitorFit puede seguir funcionando."
+    );
+  }
+}, [userId]);
+
+ useEffect(() => {
+  if (!userId) return;
+  localStorage.setItem(keyUsuario(keyRegistros), JSON.stringify(registros));
+}, [userId, registros]);
+
+useEffect(() => {
+  if (!userId) return;
+  localStorage.setItem(keyUsuario(keyVariantes), JSON.stringify(variantes));
+}, [userId, variantes]);
+
+useEffect(() => {
+  if (!userId) return;
+  localStorage.setItem(keyUsuario(keyAjustes), JSON.stringify(ajustes));
+}, [userId, ajustes]);
+
+useEffect(() => {
+  if (!userId) return;
+  localStorage.setItem(keyUsuario(keyRutinas), JSON.stringify(rutinas));
+}, [userId, rutinas]);
+
+useEffect(() => {
+  if (!userId) return;
+  localStorage.setItem(
+    keyUsuario(keyCustomLibrary),
+    JSON.stringify(bibliotecaPersonal)
+  );
+}, [userId, bibliotecaPersonal]);
+
+useEffect(() => {
+  if (!userId) return;
+  localStorage.setItem(
+    keyUsuario(keyRoutineSelection),
+    JSON.stringify({ rutinaActualId, diaActualIndex })
+  );
+}, [userId, rutinaActualId, diaActualIndex]);
+
+useEffect(() => {
+  if (!userId) return;
+  localStorage.setItem(keyUsuario(keyCalendario), JSON.stringify(calendario));
+}, [userId, calendario]);
+
+useEffect(() => {
+  if (!userId) return;
+  localStorage.setItem(keyUsuario(keyCreatina), JSON.stringify(creatina));
+}, [userId, creatina]);
+
+useEffect(() => {
+  if (!userId) return;
+  localStorage.setItem(
+    keyUsuario(keyAnatomiaOverrides),
+    JSON.stringify(anatomiaOverrides)
+  );
+}, [userId, anatomiaOverrides]);
   // Mantiene una copia en Supabase separada por usuario. Espera a terminar la carga
   // inicial para no sobrescribir accidentalmente datos existentes con valores vacíos.
   useEffect(() => {
@@ -883,7 +921,7 @@ async function cerrarSesion() {
     };
     const nuevoHistorial = { ...historial, [ej.id]: [...(historial[ej.id] ?? []), nuevo] };
     setHistorial(nuevoHistorial);
-    localStorage.setItem(keyHistorial, JSON.stringify(nuevoHistorial));
+    localStorage.setItem(keyUsuario(keyHistorial), JSON.stringify(nuevoHistorial));
     setMensaje(`✅ ${nombreVariante(ej)} guardado en el historial`);
   };
 
@@ -1291,62 +1329,181 @@ async function cerrarSesion() {
   return (
     <main className="vf-app">
       <style>{`
-        *{box-sizing:border-box} body{margin:0;background:#111315} button,input,select{font:inherit}
-        input::-webkit-outer-spin-button,input::-webkit-inner-spin-button{-webkit-appearance:none;margin:0} input[type=number]{-moz-appearance:textfield}
-        .vf-app{min-height:100vh;color:#fff;font-family:Inter,Arial,sans-serif;background:radial-gradient(circle at 15% 0%,rgba(217,75,85,.10),transparent 30%),radial-gradient(circle at 85% 18%,rgba(255,255,255,.045),transparent 26%),linear-gradient(145deg,#111315 0%,#1A1D20 48%,#121416 100%);padding:18px 16px 110px}
-        .vf-shell{width:min(100%,1280px);margin:0 auto}.vf-topbar{display:grid;grid-template-columns:1fr auto 1fr;align-items:center;gap:14px;padding:12px 4px 18px}
-        .vf-brand{display:flex;align-items:center;gap:12px;min-width:0}.vf-logo{width:54px;height:54px;object-fit:contain;filter:drop-shadow(0 0 12px rgba(246,195,68,.28))}.vf-brand-title{font-size:26px;font-weight:1000;letter-spacing:.6px;line-height:1;color:#D94B55}.vf-brand-title span{color:#D94B55}.vf-brand-sub{margin-top:5px;color:#D94B55;font-size:10px;font-weight:800;letter-spacing:1.1px}
-        .vf-day{display:flex;align-items:center;gap:8px}.vf-day button,.vf-icon-button{width:42px;height:42px;border-radius:12px;border:1px solid #343A40;background:rgba(1,12,30,.88);color:#D94B55;font-size:22px;cursor:pointer}.vf-day-pill{min-width:170px;text-align:center;padding:12px 18px;border:1px solid #3B4248;border-radius:13px;color:#D94B55;font-weight:900;background:rgba(2,11,28,.72)}.vf-actions{display:flex;justify-content:flex-end;gap:10px}
-        .vf-routine-name{text-align:center;color:#AEB4B9;font-size:11px;margin:-7px 0 12px}.vf-stats{display:grid;grid-template-columns:1.1fr 1fr 1fr 1.35fr;border:1px solid #30363B;border-radius:18px;overflow:hidden;background:rgba(2,10,25,.72);margin-bottom:22px}.vf-stat{min-height:132px;padding:20px 12px;text-align:center;display:flex;flex-direction:column;align-items:center;justify-content:center;position:relative}.vf-stat+.vf-stat:before{content:"";position:absolute;left:0;top:26px;bottom:26px;width:1px;background:rgba(84,124,165,.4)}.vf-ring{width:92px;height:92px;border-radius:50%;display:flex;align-items:center;justify-content:center;background:conic-gradient(#D94B55 calc(var(--progress)*1%),#314331 0 72%,#111811 0);position:relative}.vf-ring:after{content:"";position:absolute;inset:9px;border-radius:50%;background:#15181B}.vf-ring-text{position:relative;z-index:1;font-weight:1000;font-size:24px}.vf-stat-icon{font-size:28px;margin-bottom:8px}.vf-stat-value{font-size:24px;font-weight:1000}.vf-stat-label{color:#D94B55;font-size:11px;font-weight:900;letter-spacing:.6px;margin-top:5px}.vf-stat-sub{color:#C2C7CB;font-size:11px;line-height:1.35;margin-top:4px}
-        .vf-card{border:1px solid rgba(234,28,75,.8);border-radius:18px;background:linear-gradient(145deg,rgba(31,35,39,.98),rgba(20,23,26,.98));margin-bottom:18px;overflow:hidden;box-shadow:0 16px 34px rgba(0,0,0,.22)}.vf-card-head{display:grid;grid-template-columns:auto 1fr auto;gap:14px;align-items:center;padding:16px 18px 12px}.vf-num{width:50px;height:50px;border-radius:11px;display:flex;align-items:center;justify-content:center;font-size:24px;font-weight:1000;color:#D94B55;background:linear-gradient(135deg,#25292D,#191C1F);border:1px solid #D94B55}.vf-title-row{display:flex;flex-wrap:wrap;align-items:center;gap:10px}.vf-ex-title{font-size:23px;font-weight:1000;text-transform:uppercase;line-height:1.08}.vf-tag{color:#D94B55;border:1px solid rgba(141,255,0,.45);background:rgba(141,255,0,.10);border-radius:7px;padding:5px 9px;font-size:10px;font-weight:1000;text-transform:uppercase}.vf-prescription{margin-top:7px;color:#D94B55;font-size:13px;font-weight:700}.vf-ex-icon{font-size:44px;min-width:56px;text-align:center}
-        .vf-anatomy{width:82px;min-width:82px;text-align:center;color:#D94B55;font-size:8px;font-weight:900;text-transform:uppercase}.vf-anatomy svg{display:block;width:64px;height:78px;margin:auto;filter:drop-shadow(0 0 7px rgba(141,255,0,.12))}.vf-anatomy .an-body{fill:url(#skin);stroke:#8a8a8a;stroke-width:1.15}.vf-anatomy .an-muscle{fill:rgba(120,120,120,.14);stroke:#242424;stroke-width:.65}.vf-anatomy .an-muscle.active{fill:#D94B55;stroke:#7E242B;stroke-width:1;filter:drop-shadow(0 0 3px rgba(255,25,25,.78))}.vf-anatomy .an-detail{fill:none;stroke:#9a9a9a;stroke-width:.8;opacity:.75}.vf-pause{margin-top:9px;border:1px solid #D94B55;background:#1B1E21;color:#D94B55;border-radius:8px;padding:6px 10px;font-size:10px;font-weight:1000;cursor:pointer}.vf-pause.paused{background:#D94B55;color:#050805}.vf-lib-top{display:grid;grid-template-columns:1fr auto;gap:8px;align-items:center}.vf-lib-muscle{color:#E35D66;font-size:10px;font-weight:1000;text-transform:uppercase;margin-top:4px}
-        .vf-anatomy-edit{margin-top:10px;border-top:1px solid #343A40;padding-top:10px}.vf-anatomy-edit summary{cursor:pointer;color:#E8878E;font-size:11px;font-weight:900;list-style:none}.vf-anatomy-edit summary::-webkit-details-marker{display:none}.vf-anatomy-editor{display:grid;grid-template-columns:1fr auto;gap:8px;margin-top:9px}.vf-anatomy-editor select{min-width:0}.vf-anatomy-reset{border:1px solid #515A61;background:#202428;color:#fff;border-radius:9px;padding:8px 10px;cursor:pointer;font-weight:800}.vf-anatomy-saved{font-size:9px;color:#9EA5AB;margin-top:6px}
-        .vf-anatomia-pro{width:104px;min-width:104px;height:118px;position:relative;overflow:hidden;border-radius:12px;border:1px solid #3B4248;background:linear-gradient(145deg,#202428,#111315);display:flex;align-items:center;justify-content:center}
-        .vf-anatomia-pro img{width:100%;height:100%;object-fit:cover;display:block;filter:saturate(.92) contrast(1.04)}
-        .vf-anatomia-pro span{position:absolute;left:5px;right:5px;bottom:5px;padding:4px 5px;border-radius:6px;background:rgba(8,10,12,.82);color:#fff;font-size:8px;font-weight:900;text-align:center;text-transform:uppercase;line-height:1.1;backdrop-filter:blur(4px)}
-        .vf-anatomia-pro.compact{width:82px;min-width:82px;height:92px;border-radius:10px}
-        @media(max-width:700px){.vf-anatomia-pro{width:82px;min-width:82px;height:96px}.vf-anatomia-pro.compact{width:68px;min-width:68px;height:78px}}
-        .vf-muscle-badge{min-width:92px;max-width:110px;display:flex;flex-direction:column;align-items:center;justify-content:center;gap:3px;padding:10px 8px;border:1px solid #3B4248;border-radius:12px;background:linear-gradient(145deg,#22262A,#171A1D);text-align:center}.vf-muscle-badge span{color:#D94B55;font-size:18px;line-height:1}.vf-muscle-badge small{font-size:8px;color:#8E969D;letter-spacing:.8px}.vf-muscle-badge strong{font-size:9px;color:#F3F4F5;text-transform:uppercase;line-height:1.2}.vf-muscle-badge.compact{min-width:72px;padding:8px 6px}.vf-muscle-badge.compact small{display:none}
-        .vf-panel.today{box-shadow:inset 0 0 0 1px rgba(217,75,85,.12),0 12px 30px rgba(0,0,0,.18)}.vf-input{background:#101214!important;border-color:#424950!important}.vf-input:focus{border-color:#D94B55!important;box-shadow:0 0 0 3px rgba(217,75,85,.13)!important}.vf-save{color:#fff!important;box-shadow:0 8px 22px rgba(182,50,61,.18)}.vf-num{color:#fff!important}.vf-tag{color:#E8878E!important;background:rgba(217,75,85,.08)!important;border-color:rgba(217,75,85,.32)!important}
-        .vf-alt-wrap{padding:0 18px 12px}.vf-alt-button{width:100%;border:1px dashed rgba(246,195,68,.38);background:rgba(0,0,0,.18);color:#D8A9AD;border-radius:10px;padding:9px 12px;cursor:pointer;font-weight:800;font-size:12px}.vf-alt-tools{display:flex;gap:8px;margin-top:8px}.vf-alt-tools button{flex:1;border:1px solid #343A40;background:#1C2024;color:#C8CDD1;border-radius:9px;padding:8px;cursor:pointer;font-size:11px;font-weight:800}.vf-alt-tools button.active{border-color:#D94B55;color:#D94B55}.vf-alt-list{display:grid;grid-template-columns:repeat(3,minmax(0,1fr));gap:8px;margin-top:8px;max-height:260px;overflow:auto}.vf-alt-option{border:1px solid #343A40;background:#1A1D20;color:#F0F2F3;padding:10px;border-radius:10px;cursor:pointer;text-align:left;font-size:12px}.vf-alt-option.active{border-color:#D94B55;color:#D94B55;box-shadow:0 0 0 1px rgba(246,195,68,.18) inset}
-        .vf-compare-grid{display:grid;grid-template-columns:1fr 1fr;gap:12px;padding:0 18px 14px}.vf-panel{border-radius:14px;padding:14px;min-width:0}.vf-panel.last{border:1px solid #515A61;background:rgba(3,21,46,.74)}.vf-panel.today{border:1px solid #D94B55;background:rgba(19,8,24,.76)}.vf-panel-head{display:flex;align-items:center;justify-content:space-between;gap:10px;margin-bottom:12px;font-size:13px;font-weight:1000;color:#D94B55}.vf-date{border:1px solid #515A61;border-radius:8px;padding:5px 8px;color:#C8CDD1;font-size:10px;white-space:nowrap}.vf-series-row{display:grid;grid-template-columns:36px repeat(3,minmax(0,1fr));gap:8px;align-items:center;margin-bottom:9px}.vf-slabel{color:#D94B55;font-weight:1000;font-size:16px}.vf-box{min-height:52px;display:flex;flex-direction:column;align-items:center;justify-content:center;border:1px solid #41484E;background:#191C1F;border-radius:9px;text-align:center}.vf-box strong{font-size:18px}.vf-box small{color:#9da79d;font-size:9px;margin-top:2px}.vf-input{width:100%;min-width:0;min-height:52px;border:1px solid #41484E;background:#191C1F;color:white;border-radius:9px;text-align:center;outline:none;font-size:16px;font-weight:800}.vf-input:focus{border-color:#D94B55;box-shadow:0 0 0 2px rgba(233,30,80,.12)}.vf-compare{grid-column:2/5;color:#D94B55;font-size:10px;font-weight:900;margin-top:-4px;line-height:1.2}.vf-card-actions{display:grid;grid-template-columns:1fr 190px;gap:12px;padding:0 18px 18px}.vf-save{border:1px solid #D94B55;color:#D94B55;background:linear-gradient(135deg,#B6323D,#D94B55);border-radius:11px;min-height:48px;font-weight:1000;cursor:pointer;font-size:14px}.vf-rest{border:1px solid #3b473b;color:#D94B55;background:#080d08;border-radius:11px;min-height:48px;font-weight:1000;cursor:pointer}
-        .vf-message{position:fixed;left:50%;transform:translateX(-50%);bottom:88px;z-index:50;max-width:min(92vw,720px);padding:10px 14px;background:#1A1D20;border:1px solid #D94B55;border-radius:10px;color:#D94B55;font-weight:800;font-size:12px;box-shadow:0 12px 30px rgba(0,0,0,.45)}.vf-page-title{margin:4px 0 16px;font-size:28px;font-weight:1000;color:#D94B55}.vf-section-card{border:1px solid #30363B;background:rgba(3,13,30,.76);border-radius:16px;padding:16px;margin-bottom:12px}.vf-muted{color:#9EA5AB;font-size:12px}.vf-history-ex{display:grid;grid-template-columns:1fr auto;gap:12px;align-items:start;padding:12px 0;border-bottom:1px solid rgba(80,111,146,.24)}.vf-history-ex:last-child{border-bottom:0}.vf-history-name{font-weight:900}.vf-mini-series{display:flex;gap:6px;flex-wrap:wrap;margin-top:8px}.vf-mini-chip{border:1px solid #3B4248;background:#191C1F;border-radius:8px;padding:6px 8px;font-size:10px}.vf-progress-grid{display:grid;grid-template-columns:repeat(3,minmax(0,1fr));gap:12px}.vf-record{border:1px solid #343A40;border-radius:14px;background:linear-gradient(135deg,rgba(8,14,8,.9),rgba(3,6,3,.9));padding:14px}.vf-record h3{margin:0 0 6px;font-size:15px}.vf-record-big{font-size:24px;color:#D94B55;font-weight:1000;margin:8px 0 2px}
-        .vf-toolbar{display:flex;gap:10px;flex-wrap:wrap;margin-bottom:14px}.vf-primary,.vf-secondary,.vf-danger{border-radius:10px;padding:10px 13px;font-weight:900;cursor:pointer}.vf-primary{border:1px solid #D94B55;background:linear-gradient(135deg,#B6323D,#D94B55);color:#D94B55}.vf-secondary{border:1px solid #3B4248;background:#1A1D20;color:#F0F2F3}.vf-danger{border:1px solid #71343A;background:#2B1B1E;color:#E8A2A7}.vf-routines{display:grid;grid-template-columns:repeat(2,minmax(0,1fr));gap:14px}.vf-routine-day{border:1px solid #303b30;border-radius:16px;background:rgba(4,17,38,.78);padding:16px}.vf-routine-day h3{color:#D94B55;margin:0 0 4px}.vf-routine-list{margin:12px 0 0;padding:0;list-style:none}.vf-routine-list li{padding:8px 0;border-top:1px solid rgba(66,94,125,.22);font-size:12px}
-        .vf-editor{border:1px solid #D94B55;background:rgba(3,13,30,.88);border-radius:18px;padding:18px;margin-top:18px}.vf-editor-head{display:grid;grid-template-columns:1fr 1fr;gap:10px}.vf-text{width:100%;background:#1A1D20;border:1px solid #3B4248;color:white;border-radius:9px;padding:10px;outline:none}.vf-day-tabs{display:flex;gap:8px;flex-wrap:wrap;margin:14px 0}.vf-day-tab{border:1px solid #3B4248;background:#1A1D20;color:#F0F2F3;border-radius:9px;padding:9px 12px;cursor:pointer}.vf-day-tab.active{border-color:#D94B55;color:#D94B55}.vf-edit-ex{display:grid;grid-template-columns:36px minmax(180px,1fr) 90px 90px 80px auto;gap:8px;align-items:center;padding:10px 0;border-top:1px solid rgba(66,94,125,.22)}.vf-edit-ex:first-of-type{border-top:0}.vf-edit-controls{display:flex;gap:4px}.vf-edit-controls button{border:1px solid #3B4248;background:#1A1D20;color:#F0F2F3;border-radius:7px;padding:7px;cursor:pointer}
-        .vf-library-head{display:grid;grid-template-columns:2fr repeat(3,1fr);gap:9px;margin-bottom:12px}.vf-library-grid{display:grid;grid-template-columns:repeat(3,minmax(0,1fr));gap:10px}.vf-lib-card{border:1px solid #343A40;background:linear-gradient(135deg,rgba(8,14,8,.9),rgba(3,6,3,.9));border-radius:13px;padding:12px}.vf-lib-card h3{font-size:14px;margin:0 0 6px}.vf-lib-meta{font-size:10px;color:#9EA5AB;line-height:1.5}.vf-lib-card button{margin-top:9px;width:100%}.vf-lib-count{color:#D94B55;font-weight:900;margin:0 0 12px}.vf-custom-form{display:grid;grid-template-columns:2fr 1fr 1fr 1fr 1fr;gap:8px;margin:12px 0}.vf-setting{display:flex;justify-content:space-between;align-items:center;gap:16px;padding:14px 0;border-bottom:1px solid rgba(66,94,125,.25)}.vf-setting:last-child{border-bottom:0}.vf-setting select,.vf-setting button{background:#1C2024;color:white;border:1px solid #3B4248;border-radius:9px;padding:9px 12px}
-        .vf-start{display:grid;gap:16px;padding:12px 0 24px}.vf-start-hero{border:1px solid #6b5614;background:linear-gradient(135deg,rgba(246,195,68,.12),rgba(2,10,25,.82));border-radius:22px;padding:28px;text-align:center;box-shadow:0 18px 50px rgba(0,0,0,.28)}.vf-start-hero h1{margin:0;color:#D94B55;font-size:clamp(28px,6vw,48px);font-weight:1000}.vf-start-hero p{margin:10px 0 0;color:#AEB4B9}.vf-start-grid{display:grid;grid-template-columns:repeat(2,minmax(0,1fr));gap:12px}.vf-start-card{border:1px solid #343A40;background:rgba(3,13,30,.82);border-radius:18px;padding:20px;text-align:left;color:#fff;cursor:pointer;min-height:118px}.vf-start-card strong{display:block;color:#D94B55;font-size:18px;margin:8px 0 5px}.vf-start-card span{color:#AEB4B9;font-size:12px;line-height:1.5}.vf-start-card .vf-start-icon{font-size:28px}.vf-start-card.primary{grid-column:1/-1;border-color:#D94B55;background:linear-gradient(135deg,rgba(246,195,68,.18),rgba(165,0,68,.12))}@media(max-width:650px){.vf-start-grid{grid-template-columns:1fr}.vf-start-card.primary{grid-column:auto}}
-        .vf-bottom{position:fixed;left:50%;transform:translateX(-50%);bottom:12px;z-index:20;width:min(calc(100% - 24px),1280px);display:grid;grid-template-columns:repeat(8,1fr);border:1px solid #334033;background:rgba(1,10,24,.94);backdrop-filter:blur(14px);border-radius:14px;overflow:hidden;box-shadow:0 14px 40px rgba(0,0,0,.45)}.vf-nav{min-height:64px;border:0;border-right:1px solid rgba(52,89,129,.32);background:transparent;color:#F0F2F3;cursor:pointer;font-size:10px;font-weight:800}.vf-nav:last-child{border-right:0}.vf-nav span{display:block;font-size:20px;margin-bottom:4px}.vf-nav.active{color:#D94B55;background:linear-gradient(180deg,rgba(12,63,118,.24),rgba(165,0,68,.16));box-shadow:inset 0 -3px 0 #D94B55}.vf-home{display:inline-block;color:#9EA5AB;text-decoration:none;font-size:11px;margin:4px 0 84px}
-        .vf-calendar-top{display:grid;grid-template-columns:1fr auto;gap:14px;align-items:end;margin-bottom:14px}.vf-calendar-controls{display:grid;grid-template-columns:1fr 1fr;gap:10px}.vf-calendar-month{display:flex;align-items:center;gap:10px}.vf-calendar-month button{width:42px;height:42px;border-radius:10px;border:1px solid #3B4248;background:#1C2024;color:#D94B55;cursor:pointer;font-size:20px}.vf-calendar-title{font-size:22px;font-weight:1000;color:#D94B55;text-transform:capitalize}.vf-calendar-stats{display:grid;grid-template-columns:repeat(3,1fr);gap:10px;margin-bottom:14px}.vf-calendar-stat{border:1px solid #343A40;background:rgba(3,13,30,.78);border-radius:13px;padding:12px;text-align:center}.vf-calendar-stat strong{display:block;font-size:22px;color:#D94B55}.vf-calendar-week{display:grid;grid-template-columns:repeat(8,1fr);gap:6px;margin-bottom:6px}.vf-calendar-week div{text-align:center;color:#7f93aa;font-size:11px;font-weight:900;padding:6px}.vf-calendar-grid{display:grid;grid-template-columns:repeat(8,1fr);gap:6px}.vf-cal-day{min-height:112px;border:1px solid #30363B;background:rgba(4,17,38,.78);border-radius:12px;padding:9px;cursor:pointer;position:relative;transition:.15s}.vf-cal-day:hover{border-color:#D94B55;transform:translateY(-1px)}.vf-cal-day.empty{opacity:0;pointer-events:none}.vf-cal-day.today{box-shadow:inset 0 0 0 2px #D94B55}.vf-cal-day.planned{border-color:#515A61;background:linear-gradient(135deg,rgba(0,77,152,.28),rgba(4,17,38,.9))}.vf-cal-day.done{border-color:#D94B55;background:linear-gradient(135deg,rgba(0,105,76,.28),rgba(4,17,38,.9))}.vf-cal-num{font-weight:1000;font-size:15px}.vf-cal-badge{margin-top:8px;font-size:10px;font-weight:900;color:#D94B55;line-height:1.35}.vf-cal-done{color:#D94B55}.vf-cal-open{margin-top:8px;width:100%;border:1px solid #3B4248;background:#191C1F;color:#F0F2F3;border-radius:7px;padding:6px;font-size:9px;font-weight:900;cursor:pointer}.vf-calendar-help{color:#9EA5AB;font-size:11px;line-height:1.55;margin:8px 0 16px}
-        @media(max-width:850px){.vf-topbar{grid-template-columns:1fr auto}.vf-day{grid-column:1/-1;grid-row:2;justify-content:center}.vf-actions{display:none}.vf-stats{grid-template-columns:1fr 1fr}.vf-stat:nth-child(3),.vf-stat:nth-child(4){border-top:1px solid rgba(84,124,165,.35)}.vf-stat:nth-child(3):before{display:none}.vf-progress-grid,.vf-routines,.vf-library-grid{grid-template-columns:1fr 1fr}.vf-library-head{grid-template-columns:1fr 1fr}.vf-custom-form{grid-template-columns:1fr 1fr}.vf-edit-ex{grid-template-columns:32px 1fr 75px 75px 65px}.vf-edit-controls{grid-column:2/-1}.vf-bottom{grid-template-columns:repeat(3,1fr)}}
-        .vf-creatine-today{display:grid;grid-template-columns:1fr auto;gap:14px;align-items:center;border:1px solid rgba(56,217,150,.55);background:linear-gradient(135deg,rgba(2,70,48,.34),rgba(4,17,38,.88));border-radius:16px;padding:14px 16px;margin-bottom:16px;box-shadow:0 12px 28px rgba(0,0,0,.18)}.vf-creatine-today.pending{border-color:rgba(246,195,68,.58);background:linear-gradient(135deg,rgba(104,70,0,.22),rgba(4,17,38,.9))}.vf-creatine-title{font-size:13px;font-weight:1000;color:#D94B55;letter-spacing:.6px}.vf-creatine-status{font-size:21px;font-weight:1000;margin-top:4px;color:#D94B55}.vf-creatine-today.pending .vf-creatine-status{color:#D94B55}.vf-creatine-button{border:1px solid #D94B55;background:linear-gradient(135deg,#B6323D,#D94B55);color:white;border-radius:10px;padding:11px 14px;font-weight:1000;cursor:pointer;white-space:nowrap}.vf-creatine-button.done{background:#191C1F;border-color:#3B4248;color:#AEB4B9}.vf-creatine-summary{display:grid;grid-template-columns:repeat(4,1fr);gap:10px;margin:12px 0 16px}.vf-creatine-stat{border:1px solid #343A40;background:rgba(3,13,30,.78);border-radius:13px;padding:12px;text-align:center}.vf-creatine-stat strong{display:block;font-size:21px;color:#D94B55}.vf-creatine-stat span{display:block;margin-top:3px}.vf-creatine-ring{width:92px;height:92px;border-radius:50%;margin:0 auto 8px;display:flex;align-items:center;justify-content:center;background:conic-gradient(#D94B55 calc(var(--creatine-pct) * 1%),#151d15 0);position:relative}.vf-creatine-ring:after{content:"";position:absolute;inset:9px;background:#15181B;border-radius:50%}.vf-creatine-ring strong{position:relative;z-index:1;font-size:22px;color:#fff}.vf-creatine-day{margin-top:7px;width:100%;border:1px solid #3B4248;background:#191C1F;color:#AEB4B9;border-radius:7px;padding:5px 4px;font-size:9px;font-weight:900;cursor:pointer}.vf-creatine-day.taken{border-color:#D94B55;background:rgba(7,112,67,.35);color:#baff68}.vf-creatine-note{border:1px solid rgba(56,217,150,.34);background:rgba(4,40,30,.28);border-radius:12px;padding:12px 14px;color:#b8c8d9;font-size:11px;line-height:1.55;margin:12px 0 16px}
-        @media(max-width:620px){.vf-creatine-today{grid-template-columns:1fr}.vf-creatine-button{width:100%}.vf-creatine-summary{grid-template-columns:1fr 1fr}.vf-app{padding:10px 8px 120px}.vf-brand-title{font-size:22px}.vf-logo{width:46px;height:46px}.vf-compare-grid{grid-template-columns:1fr}.vf-card-actions{grid-template-columns:1fr}.vf-alt-list,.vf-library-grid,.vf-progress-grid,.vf-routines{grid-template-columns:1fr}.vf-library-head,.vf-custom-form,.vf-editor-head{grid-template-columns:1fr}.vf-card-head{grid-template-columns:auto 1fr auto}.vf-anatomy{width:58px;min-width:58px}.vf-anatomy svg{width:48px;height:62px}.vf-anatomy span{display:none}.vf-ex-title{font-size:18px}.vf-series-row{grid-template-columns:28px repeat(3,minmax(0,1fr));gap:5px}.vf-panel{padding:10px 8px}.vf-bottom{bottom:6px}.vf-nav{min-height:54px;font-size:8px}.vf-nav span{font-size:17px}.vf-edit-ex{grid-template-columns:30px 1fr 58px 58px 58px;gap:5px}.vf-edit-ex .vf-text{padding:7px;font-size:11px}.vf-calendar-top{grid-template-columns:1fr}.vf-calendar-controls{grid-template-columns:1fr}.vf-calendar-stats{grid-template-columns:repeat(3,1fr)}.vf-cal-day{min-height:84px;padding:6px}.vf-cal-badge{font-size:8px}.vf-cal-open{display:none}}
+        *{box-sizing:border-box}
+        :root{color-scheme:dark;--red:#ff304a;--red2:#c8102e;--bg:#08090c;--panel:#111318;--panel2:#17191f;--line:#292d35;--muted:#858b96}
+        html,body{margin:0;background:#08090c}button,input,select{font:inherit}button{cursor:pointer}
+        body{overflow-x:hidden}.vf-app{min-height:100vh;color:#f7f7f8;font-family:Inter,Arial,sans-serif;background:radial-gradient(circle at 92% 4%,rgba(200,16,46,.10),transparent 24%),linear-gradient(145deg,#08090c,#0d0f13 58%,#08090c);padding:0}
+        .vf-shell{width:100%;min-height:100vh;display:grid;grid-template-columns:260px minmax(0,1fr)}
+        .vf-sidebar{position:sticky;top:0;height:100vh;padding:26px 18px;border-right:1px solid #22262d;background:rgba(9,10,13,.96);display:flex;flex-direction:column;z-index:30}
+        .vf-side-brand{display:flex;align-items:center;gap:12px;padding:0 10px 28px}.vf-side-brand img{width:48px;height:48px;object-fit:contain}.vf-side-brand b{font-size:20px;letter-spacing:.8px}.vf-side-brand b span{color:var(--red)}.vf-side-brand small{display:block;color:#646a74;font-size:8px;letter-spacing:1.4px;margin-top:4px}
+        .vf-side-nav{display:grid;gap:6px}.vf-side-nav button{display:grid;grid-template-columns:36px 1fr;align-items:center;text-align:left;min-height:50px;border:1px solid transparent;border-radius:11px;background:transparent;color:#8c929c;padding:0 12px}.vf-side-nav button span{font-size:18px;text-align:center}.vf-side-nav button b{font-size:12px;letter-spacing:.3px}.vf-side-nav button:hover{color:#fff;background:#12151a}.vf-side-nav button.active{color:#fff;border-color:rgba(255,48,74,.28);background:linear-gradient(90deg,rgba(255,48,74,.16),rgba(255,48,74,.03));box-shadow:inset 3px 0 0 var(--red)}
+        .vf-side-footer{margin-top:auto;border-top:1px solid #20242a;padding:20px 10px 0;display:flex;align-items:center;gap:10px}.vf-online-dot{width:8px;height:8px;border-radius:50%;background:#31d27c;box-shadow:0 0 10px #31d27c}.vf-side-footer b{font-size:11px}.vf-side-footer small{display:block;color:#646a74;font-size:9px;margin-top:2px}
+        .vf-content{min-width:0;width:100%;max-width:1540px;margin:0 auto;padding:26px 42px 110px}
+        .vf-topbar{display:grid;grid-template-columns:1fr auto 1fr;align-items:center;gap:18px;margin-bottom:26px}.vf-brand{display:none}.vf-day{display:flex;align-items:center;justify-content:center;gap:8px}.vf-day button,.vf-icon-button{width:42px;height:42px;border:1px solid var(--line);border-radius:10px;background:#12151a;color:#fff}.vf-day button:hover,.vf-icon-button:hover{border-color:#5a2c34;color:var(--red)}.vf-day-pill{min-width:180px;padding:12px 16px;text-align:center;border:1px solid var(--line);border-radius:10px;background:#12151a;font-size:11px;font-weight:900}.vf-actions{display:flex;justify-content:flex-end;gap:8px}.vf-routine-name{text-align:center;color:#626873;font-size:10px;margin:-18px 0 22px}
+        .vf-dashboard-head{display:flex;justify-content:space-between;align-items:flex-end;gap:28px;padding:30px 0 26px;border-bottom:1px solid #20242a}.vf-eyebrow,.vf-card-kicker{color:var(--red);font-size:10px;font-weight:1000;letter-spacing:1.6px}.vf-dashboard-head h1{font-size:clamp(34px,4vw,58px);line-height:1;margin:8px 0 10px;letter-spacing:-2px}.vf-dashboard-head h1 span{color:#7f858f}.vf-dashboard-head p{margin:0;color:#7d838d;font-size:13px}.vf-hero-cta,.vf-wide-cta{border:0;border-radius:11px;background:linear-gradient(135deg,var(--red2),var(--red));color:#fff;font-weight:1000;letter-spacing:.5px;box-shadow:0 14px 34px rgba(200,16,46,.20)}.vf-hero-cta{padding:15px 19px;white-space:nowrap}.vf-hero-cta span,.vf-wide-cta span{margin-left:16px}
+        .vf-home-metrics{display:grid;grid-template-columns:repeat(4,1fr);gap:12px;margin:22px 0}.vf-home-metrics article{min-height:116px;border:1px solid var(--line);border-radius:14px;background:linear-gradient(145deg,#15181d,#0f1115);padding:18px;display:flex;align-items:center;gap:14px}.vf-metric-icon{width:44px;height:44px;display:grid;place-items:center;border-radius:10px;background:rgba(255,48,74,.09);border:1px solid rgba(255,48,74,.20);font-size:20px}.vf-home-metrics small{display:block;color:#777e88;font-size:9px;font-weight:900;letter-spacing:1px}.vf-home-metrics strong{display:block;font-size:23px;margin:5px 0 2px}.vf-home-metrics span{color:#666d77;font-size:10px}
+        .vf-home-grid{display:grid;grid-template-columns:1.35fr 1fr;gap:14px}.vf-home-grid>article{border:1px solid var(--line);border-radius:16px;background:linear-gradient(145deg,#15181d,#0f1115);padding:22px;min-width:0}.vf-next-workout{grid-row:span 2}.vf-next-top{display:flex;justify-content:space-between;gap:18px;align-items:center;margin:10px 0 20px}.vf-next-top h2{font-size:28px;margin:0 0 5px}.vf-next-top p{margin:0;color:#777e88;font-size:11px}.vf-day-number{width:58px;height:58px;display:grid;place-items:center;border-radius:14px;border:1px solid rgba(255,48,74,.35);background:rgba(255,48,74,.08);font-size:26px;font-weight:1000;color:var(--red)}.vf-ex-preview{display:grid;gap:7px}.vf-ex-preview>div{display:grid;grid-template-columns:38px 1fr;align-items:center;gap:10px;padding:11px 12px;border:1px solid #242830;border-radius:10px;background:#0e1014}.vf-ex-preview>div>span{color:#555c66;font-size:11px;font-weight:1000}.vf-ex-preview b{font-size:12px}.vf-ex-preview small{display:block;color:#686f79;font-size:9px;margin-top:3px}.vf-wide-cta{width:100%;padding:14px;margin-top:14px}.vf-card-title-row{display:flex;align-items:center;justify-content:space-between;gap:12px}.vf-card-title-row h3,.vf-creatine-home h3{margin:5px 0 0;font-size:19px}.vf-card-title-row button,.vf-creatine-home button{border:1px solid #30353d;background:#111419;color:#9ba1aa;border-radius:8px;padding:8px 10px;font-size:8px;font-weight:900}.vf-week-days{display:grid;grid-template-columns:repeat(7,1fr);gap:6px;margin:20px 0}.vf-week-days div{text-align:center}.vf-week-days span{display:block;color:#666d76;font-size:8px;margin-bottom:6px}.vf-week-days b{width:30px;height:30px;margin:auto;display:grid;place-items:center;border-radius:50%;background:#0d0f13;border:1px solid #272b32;color:#555b64;font-size:10px}.vf-week-days div.done b{background:rgba(255,48,74,.12);border-color:rgba(255,48,74,.45);color:var(--red)}.vf-week-progress>div:first-child{display:flex;justify-content:space-between;color:#777e88;font-size:9px}.vf-progress-track{height:5px;background:#242830;border-radius:10px;margin-top:8px;overflow:hidden}.vf-progress-track i{display:block;height:100%;background:var(--red);border-radius:10px}.vf-last-title{display:block;margin:18px 0 10px;font-size:15px}.vf-last-series{display:grid;grid-template-columns:repeat(3,1fr);gap:8px}.vf-last-series div{padding:11px;border:1px solid #262a31;border-radius:9px;background:#0d0f13}.vf-last-series small{display:block;color:#666d76;font-size:7px}.vf-last-series b{display:block;margin:5px 0 2px}.vf-last-series span{color:#858b94;font-size:9px}.vf-creatine-home{text-align:center}.vf-creatine-home .vf-card-kicker,.vf-creatine-home h3{text-align:left}.vf-creatine-circle{width:104px;height:104px;margin:17px auto 10px;border-radius:50%;display:grid;place-content:center;border:8px solid #2a2e35;outline:2px solid rgba(255,48,74,.30);background:#101217}.vf-creatine-circle strong{font-size:24px}.vf-creatine-circle span{font-size:8px;color:#737a84}.vf-creatine-home p{color:#727983;font-size:9px}.vf-creatine-home button{width:100%;margin-top:7px}
+        .vf-stats{display:grid;grid-template-columns:repeat(4,1fr);border:1px solid var(--line);border-radius:16px;overflow:hidden;background:#111419;margin-bottom:16px}.vf-stat{padding:18px;text-align:center;min-height:125px;border-right:1px solid var(--line)}.vf-stat:last-child{border:0}.vf-ring{width:70px;height:70px;border-radius:50%;margin:auto;display:grid;place-items:center;background:conic-gradient(var(--red) calc(var(--progress)*1%),#292d34 0);position:relative}.vf-ring:after{content:"";position:absolute;inset:7px;border-radius:50%;background:#111419}.vf-ring-text{position:relative;z-index:1;font-weight:1000}.vf-stat-icon{font-size:24px}.vf-stat-value{font-size:22px;font-weight:1000;margin:6px 0}.vf-stat-label{font-size:9px;color:var(--red);font-weight:1000;letter-spacing:1px}.vf-stat-sub{font-size:9px;color:#737a84;margin-top:4px}
+        .vf-card,.vf-section-card,.vf-record,.vf-routine-day,.vf-editor,.vf-lib-card{border:1px solid var(--line);background:linear-gradient(145deg,#15181d,#0f1115);box-shadow:0 16px 36px rgba(0,0,0,.18)}.vf-card{border-radius:15px;margin-bottom:12px;overflow:hidden}.vf-card-head{display:grid;grid-template-columns:auto 1fr auto;gap:14px;align-items:center;padding:15px}.vf-num{width:44px;height:44px;border-radius:10px;display:grid;place-items:center;background:#0d0f13;border:1px solid rgba(255,48,74,.45);font-weight:1000;color:var(--red)}.vf-title-row{display:flex;gap:8px;align-items:center;flex-wrap:wrap}.vf-ex-title{font-size:18px;font-weight:1000;text-transform:uppercase}.vf-tag{padding:4px 7px;border-radius:6px;border:1px solid rgba(255,48,74,.28);background:rgba(255,48,74,.08);color:#ff7384;font-size:8px;font-weight:900}.vf-prescription{color:#777e88;font-size:10px;margin-top:5px}.vf-anatomia-pro{width:100px;min-width:100px;height:112px;border:1px solid #292d34;border-radius:10px;overflow:hidden;background:#0d0f13;position:relative}.vf-anatomia-pro img{width:100%;height:100%;object-fit:cover}.vf-anatomia-pro span{position:absolute;left:5px;right:5px;bottom:5px;padding:4px;background:rgba(5,6,8,.84);border-radius:5px;font-size:7px;text-align:center}.vf-anatomia-pro.compact{width:76px;min-width:76px;height:86px}
+        .vf-alt-wrap{padding:0 15px 11px}.vf-alt-button,.vf-alt-tools button,.vf-alt-option{border:1px solid #30353d;background:#111419;color:#aab0b8;border-radius:8px;padding:9px;font-size:9px}.vf-alt-button{width:100%}.vf-alt-tools{display:flex;gap:7px;margin-top:7px}.vf-alt-tools button{flex:1}.vf-alt-tools .active,.vf-alt-option.active{border-color:var(--red);color:#fff}.vf-alt-list{display:grid;grid-template-columns:repeat(3,1fr);gap:7px;margin-top:7px}
+        .vf-compare-grid{display:grid;grid-template-columns:1fr 1fr;gap:10px;padding:0 15px 12px}.vf-panel{padding:12px;border:1px solid #292d34;border-radius:11px;background:#0e1014}.vf-panel.today{border-color:rgba(255,48,74,.38)}.vf-panel-head{display:flex;justify-content:space-between;gap:8px;font-size:10px;font-weight:900;margin-bottom:9px}.vf-date{color:#6f7680}.vf-series-row{display:grid;grid-template-columns:30px repeat(3,1fr);gap:6px;align-items:center;margin-bottom:6px}.vf-slabel{color:var(--red);font-weight:1000}.vf-box,.vf-input{min-height:46px;border:1px solid #30353d;border-radius:8px;background:#0b0d10;color:#fff;text-align:center}.vf-box{display:grid;place-content:center}.vf-box small{font-size:7px;color:#666d76}.vf-input{width:100%;outline:none}.vf-input:focus,.vf-text:focus{border-color:var(--red)}.vf-compare{grid-column:2/5;color:#ff7484;font-size:8px}.vf-card-actions{display:grid;grid-template-columns:1fr 180px;gap:9px;padding:0 15px 15px}.vf-save,.vf-primary,.vf-creatine-button{border:0;background:linear-gradient(135deg,var(--red2),var(--red));color:#fff}.vf-save,.vf-rest{min-height:45px;border-radius:9px;font-weight:1000}.vf-rest{border:1px solid #30353d;background:#111419;color:#fff}
+        .vf-page-title{font-size:32px;margin:12px 0 20px}.vf-page-title:after{content:"";display:block;width:46px;height:3px;background:var(--red);margin-top:8px}.vf-section-card{padding:16px;border-radius:13px;margin-bottom:11px}.vf-muted{color:#777e88;font-size:10px}.vf-history-ex{display:grid;grid-template-columns:1fr auto;gap:10px;padding:10px 0;border-bottom:1px solid #292d34}.vf-mini-series{display:flex;gap:5px;flex-wrap:wrap;margin-top:7px}.vf-mini-chip{padding:5px 7px;border:1px solid #30353d;border-radius:7px;font-size:8px}.vf-progress-grid{display:grid;grid-template-columns:repeat(3,1fr);gap:10px}.vf-record{padding:14px;border-radius:12px}.vf-record-big{font-size:24px;color:var(--red);font-weight:1000}.vf-toolbar{display:flex;gap:8px;flex-wrap:wrap;margin-bottom:12px}.vf-primary,.vf-secondary,.vf-danger{padding:10px 12px;border-radius:9px;font-weight:900}.vf-secondary{border:1px solid #30353d;background:#15181d;color:#fff}.vf-danger{border:1px solid #71323a;background:#29171b;color:#ff9aa6}.vf-routines{display:grid;grid-template-columns:repeat(2,1fr);gap:12px}.vf-routine-day{padding:15px;border-radius:13px}.vf-routine-list{padding:0;list-style:none}.vf-routine-list li{padding:8px 0;border-top:1px solid #292d34;font-size:10px}.vf-editor{padding:16px;border-radius:14px}.vf-editor-head,.vf-library-head{display:grid;grid-template-columns:1fr 1fr;gap:8px}.vf-day-tabs{display:flex;gap:7px;flex-wrap:wrap;margin:12px 0}.vf-day-tab,.vf-edit-controls button{border:1px solid #30353d;background:#15181d;color:#fff;border-radius:8px;padding:8px}.vf-day-tab.active{border-color:var(--red)}.vf-edit-ex{display:grid;grid-template-columns:30px 1fr 80px 80px 70px auto;gap:7px;align-items:center;padding:9px 0;border-top:1px solid #292d34}.vf-text{width:100%;border:1px solid #30353d;background:#0d0f13;color:#fff;border-radius:8px;padding:10px;outline:none}.vf-library-head{grid-template-columns:2fr repeat(3,1fr)}.vf-library-grid{display:grid;grid-template-columns:repeat(3,1fr);gap:10px}.vf-lib-card{padding:12px;border-radius:12px}.vf-lib-meta,.vf-lib-muscle{font-size:9px;color:#777e88}.vf-lib-muscle{color:#ff7484}.vf-custom-form{display:grid;grid-template-columns:2fr repeat(4,1fr);gap:7px;margin:10px 0}.vf-anatomy-editor{display:grid;grid-template-columns:1fr auto;gap:7px}.vf-settings-grid{display:grid;grid-template-columns:1fr 1fr;gap:12px}.vf-toggle-row{display:flex;justify-content:space-between;gap:12px;align-items:center;padding:12px 0;border-top:1px solid #292d34}.vf-toggle,.vf-rest-choice{border:1px solid #30353d;background:#111419;color:#aaa;border-radius:8px;padding:9px}.vf-toggle.on,.vf-rest-choice.active{border-color:var(--red);color:#fff;background:rgba(255,48,74,.08)}.vf-rest-options{display:grid;grid-template-columns:repeat(4,1fr);gap:7px;margin-top:12px}.vf-settings-note{color:#777e88;font-size:9px;margin-top:10px}
+        .vf-calendar-top{display:grid;grid-template-columns:1fr auto;gap:12px}.vf-calendar-month{display:flex;align-items:center;gap:8px}.vf-calendar-month button{width:38px;height:38px;border:1px solid #30353d;background:#111419;color:#fff;border-radius:8px}.vf-calendar-title{font-size:18px;font-weight:1000}.vf-calendar-controls{display:grid;grid-template-columns:1fr 1fr;gap:8px}.vf-calendar-stats,.vf-creatine-summary{display:grid;grid-template-columns:repeat(3,1fr);gap:8px;margin:12px 0}.vf-creatine-summary{grid-template-columns:repeat(4,1fr)}.vf-calendar-stat,.vf-creatine-stat{padding:12px;border:1px solid var(--line);border-radius:10px;background:#111419;text-align:center}.vf-calendar-stat strong,.vf-creatine-stat strong{display:block;color:var(--red);font-size:20px}.vf-calendar-week,.vf-calendar-grid{display:grid;grid-template-columns:repeat(7,1fr);gap:6px}.vf-calendar-week div{text-align:center;color:#666d76;font-size:9px}.vf-cal-day{min-height:105px;padding:8px;border:1px solid #292d34;border-radius:9px;background:#111419}.vf-cal-day.today,.vf-cal-day.done{border-color:var(--red)}.vf-cal-badge{font-size:8px;color:#ff7484;margin-top:7px}.vf-cal-open,.vf-creatine-day{width:100%;margin-top:7px;padding:5px;border:1px solid #30353d;border-radius:6px;background:#0d0f13;color:#fff;font-size:8px}.vf-creatine-day.taken{border-color:var(--red);background:rgba(255,48,74,.10)}.vf-creatine-note,.vf-calendar-help{color:#777e88;font-size:9px;line-height:1.5}.vf-message{position:fixed;left:50%;bottom:80px;transform:translateX(-50%);z-index:99;padding:10px 14px;border:1px solid var(--red);border-radius:9px;background:#111419;color:#fff;font-size:10px}.vf-bottom{display:none}
+        @media(max-width:1050px){.vf-shell{grid-template-columns:210px 1fr}.vf-content{padding:22px 24px 100px}.vf-home-metrics{grid-template-columns:1fr 1fr}.vf-home-grid{grid-template-columns:1fr}.vf-next-workout{grid-row:auto}.vf-library-grid{grid-template-columns:1fr 1fr}}
+        @media(max-width:760px){.vf-shell{display:block}.vf-sidebar{display:none}.vf-content{padding:14px 12px 110px}.vf-topbar{grid-template-columns:1fr auto}.vf-brand{display:flex;align-items:center;gap:8px}.vf-logo{width:42px;height:42px}.vf-brand-title{font-weight:1000}.vf-brand-title span{color:var(--red)}.vf-brand-sub{font-size:7px;color:#666d76}.vf-day{grid-column:1/-1;grid-row:2}.vf-actions{display:none}.vf-dashboard-head{align-items:flex-start;flex-direction:column}.vf-dashboard-head h1{font-size:38px}.vf-hero-cta{width:100%}.vf-home-metrics{grid-template-columns:1fr 1fr}.vf-stats{grid-template-columns:1fr 1fr}.vf-stat:nth-child(2){border-right:0}.vf-stat:nth-child(-n+2){border-bottom:1px solid var(--line)}.vf-compare-grid{grid-template-columns:1fr}.vf-card-actions{grid-template-columns:1fr}.vf-routines,.vf-progress-grid{grid-template-columns:1fr}.vf-library-head,.vf-custom-form,.vf-editor-head,.vf-settings-grid{grid-template-columns:1fr}.vf-library-grid{grid-template-columns:1fr}.vf-bottom{position:fixed;display:grid;grid-template-columns:repeat(4,1fr);left:6px;right:6px;bottom:6px;z-index:80;border:1px solid #2a2e35;border-radius:13px;overflow:hidden;background:rgba(13,15,19,.96);backdrop-filter:blur(16px)}.vf-nav{min-height:54px;border:0;background:transparent;color:#777e88;font-size:7px}.vf-nav span{display:block;font-size:16px;margin-bottom:3px}.vf-nav.active{color:#fff;background:rgba(255,48,74,.10);box-shadow:inset 0 -2px 0 var(--red)}.vf-calendar-top{grid-template-columns:1fr}.vf-calendar-controls{grid-template-columns:1fr}.vf-cal-day{min-height:82px;padding:5px}.vf-cal-open{display:none}.vf-edit-ex{grid-template-columns:28px 1fr 58px 58px 58px}.vf-edit-controls{grid-column:2/-1}}
+        @media(max-width:500px){.vf-home-metrics{grid-template-columns:1fr}.vf-home-grid>article{padding:16px}.vf-card-head{grid-template-columns:auto 1fr auto;padding:11px}.vf-anatomia-pro{width:70px;min-width:70px;height:82px}.vf-ex-title{font-size:14px}.vf-alt-list{grid-template-columns:1fr}.vf-series-row{grid-template-columns:25px repeat(3,1fr);gap:4px}.vf-panel{padding:8px}.vf-calendar-stats{grid-template-columns:repeat(3,1fr)}.vf-creatine-summary{grid-template-columns:1fr 1fr}.vf-calendar-grid,.vf-calendar-week{gap:3px}.vf-cal-day{min-height:70px}.vf-cal-badge{font-size:6px}.vf-rest-options{grid-template-columns:1fr 1fr}}
+
+
+        
+
       `}</style>
 
-      <div className="vf-shell">
-        <header className="vf-topbar">
-          <div className="vf-brand"><img className="vf-logo" src="/icon-192.png" alt="VitorFit" /><div><div className="vf-brand-title">VITOR<span>FIT</span></div><div className="vf-brand-sub">SUPERA TUS LÍMITES</div></div></div>
-          <div className="vf-day">
-            <button onClick={() => cambiarDia(-1)}>‹</button>
-            <div className="vf-day-pill">🗓️ {diaActual?.titulo ?? "SIN DÍA"}</div>
-            <button onClick={() => cambiarDia(1)}>›</button>
-          </div>
-          <div className="vf-actions"><button className="vf-icon-button" onClick={() => setVista("progreso")}>📈</button><button className="vf-icon-button" onClick={() => setVista("ajustes")}>☰</button></div>
-        </header>
-        <div className="vf-routine-name">{rutinaActual?.nombre} · {diaActual?.subtitulo}</div>
+ <div className="vf-shell">
 
+  <aside className="vf-sidebar">
+    <div className="vf-side-brand">
+      <img src="/vitorfit-logo.png" alt="VitorFit" />
+    </div>
+
+    <nav className="vf-side-nav">
+      <button className={vista === "inicio" ? "active" : ""} onClick={() => setVista("inicio")}>
+        <span>⌂</span><b>Inicio</b>
+      </button>
+
+      <button className={vista === "entreno" ? "active" : ""} onClick={abrirEntrenamiento}>
+        <span>🏋️</span><b>Entrenamiento</b>
+      </button>
+
+      <button className={vista === "historial" ? "active" : ""} onClick={() => setVista("historial")}>
+        <span>◷</span><b>Historial</b>
+      </button>
+
+      <button className={vista === "progreso" ? "active" : ""} onClick={() => setVista("progreso")}>
+        <span>⌁</span><b>Progreso</b>
+      </button>
+
+      <button className={vista === "rutinas" ? "active" : ""} onClick={() => setVista("rutinas")}>
+        <span>☰</span><b>Rutinas</b>
+      </button>
+
+      <button
+        className={vista === "biblioteca" ? "active" : ""}
+        onClick={() => {
+          setTargetBiblioteca(null);
+          setVista("biblioteca");
+        }}
+      >
+        <span>▦</span><b>Biblioteca</b>
+      </button>
+
+      <button className={vista === "calendario" ? "active" : ""} onClick={() => setVista("calendario")}>
+        <span>□</span><b>Calendario</b>
+      </button>
+
+      <button className={vista === "ajustes" ? "active" : ""} onClick={() => setVista("ajustes")}>
+        <span>⚙</span><b>Ajustes</b>
+      </button>
+    </nav>
+
+    <div className="vf-side-footer">
+      <span className="vf-online-dot"></span>
+      <div>
+        <b>VitorFit</b>
+        <small>Datos sincronizados</small>
+      </div>
+    </div>
+  </aside>
+
+  <div className="vf-content">
+    <header className="vf-topbar">
+
+      <div className="vf-brand">
+        <img
+          className="vf-logo"
+          src="/vitorfit-logo.png"
+          alt="VitorFit"
+        />
+      </div>
+
+      <div className="vf-day">
+        <button onClick={() => cambiarDia(-1)}>‹</button>
+        <div className="vf-day-pill">
+          📅 {diaActual?.titulo ?? "SIN DÍA"}
+        </div>
+        <button onClick={() => cambiarDia(1)}>›</button>
+      </div>
+
+      <div className="vf-actions">
+        <button
+          className="vf-icon-button"
+          onClick={() => setVista("progreso")}
+        >
+          📈
+        </button>
+      </div>
+
+    </header>
+
+    <div className="vf-routine-name">
+      {rutinaActual?.nombre} · {diaActual?.subtitulo}
+    </div>
         {vista === "inicio" && <>
-          <section className="vf-start">
-            <div className="vf-start-hero">
-              <h1>VITORFIT</h1>
-              <p>Elige qué quieres hacer. El entrenamiento no empieza hasta que tú pulses Entrenar.</p>
-            </div>
-            <div className="vf-start-grid">
-              <button className="vf-start-card primary" onClick={abrirEntrenamiento}><div className="vf-start-icon">🏋️</div><strong>EMPEZAR ENTRENAMIENTO</strong><span>{diaActual?.titulo} · {diaActual?.subtitulo}</span></button>
-              <button className="vf-start-card" onClick={()=>setVista("rutinas")}><div className="vf-start-icon">↕️</div><strong>ORDENAR EJERCICIOS</strong><span>Entra en Rutinas, abre cualquiera de tus 4 días y usa ↑ ↓ para cambiar solo el orden.</span></button>
-              <button className="vf-start-card" onClick={()=>setVista("progreso")}><div className="vf-start-icon">📈</div><strong>PROGRESO</strong><span>Consulta marcas, sesiones e historial de evolución.</span></button>
-              <button className="vf-start-card" onClick={()=>setVista("calendario")}><div className="vf-start-icon">📅</div><strong>CALENDARIO</strong><span>Planifica entrenamientos y registra tu creatina.</span></button>
-              <button className="vf-start-card" onClick={()=>setVista("historial")}><div className="vf-start-icon">🕘</div><strong>HISTORIAL</strong><span>Revisa tus entrenamientos anteriores.</span></button>
-            </div>
+          <section className="vf-dashboard-head">
+<div>
+  <img
+    src="/vitorfit-logo.png"
+    alt="VitorFit"
+    style={{ width: "70px", height: "70px", objectFit: "contain", marginBottom: "12px" }}
+  />
+  <div className="vf-eyebrow">VITORFIT DASHBOARD</div>
+  <h1>Hola, <span>vamos a entrenar.</span></h1>
+  <p>Todo tu progreso, rutina y constancia en un solo lugar.</p>
+</div>            <button className="vf-hero-cta" onClick={abrirEntrenamiento}>INICIAR ENTRENAMIENTO <span>→</span></button>
+          </section>
+
+          <section className="vf-home-metrics">
+            <article><div className="vf-metric-icon">🔥</div><div><small>RACHA ACTUAL</small><strong>{rachaCalendario} días</strong><span>Sigue sumando</span></div></article>
+            <article><div className="vf-metric-icon">▥</div><div><small>CREATINA</small><strong>{estadisticasCreatina.porcentaje}%</strong><span>{estadisticasCreatina.rachaActual} días de racha</span></div></article>
+          </section>
+
+          <section className="vf-home-grid">
+            <article className="vf-next-workout">
+              <div className="vf-card-kicker">PRÓXIMO ENTRENAMIENTO</div>
+              <div className="vf-next-top"><div><h2>{diaActual?.titulo ?? "ENTRENAMIENTO"}</h2><p>{diaActual?.subtitulo ?? rutinaActual?.nombre}</p></div><div className="vf-day-number">{diaActualIndex+1}</div></div>
+              <div className="vf-ex-preview">{(diaActual?.ejercicios??[]).slice(0,4).map((e,i)=><div key={e.id}><span>{String(i+1).padStart(2,"0")}</span><div><b>{e.nombre}</b><small>{e.series} series · {e.reps} reps</small></div></div>)}</div>
+              <button className="vf-wide-cta" onClick={abrirEntrenamiento}>EMPEZAR AHORA <span>→</span></button>
+            </article>
+
+            <article className="vf-week-card">
+              <div className="vf-card-title-row"><div><div className="vf-card-kicker">ESTA SEMANA</div><h3>Constancia</h3></div><button onClick={()=>setVista("calendario")}>VER CALENDARIO</button></div>
+              <div className="vf-week-days">{["L","M","X","J","V","S","D"].map((d,i)=><div key={d+i} className={i<Math.min(7,resumenCalendario.completados)?"done":""}><span>{d}</span><b>{i<Math.min(7,resumenCalendario.completados)?"✓":"·"}</b></div>)}</div>
+              <div className="vf-week-progress"><div><span>Objetivo semanal</span><b>{resumenCalendario.completados} completados</b></div><div className="vf-progress-track"><i style={{width:`${Math.min(100,(resumenCalendario.completados/4)*100)}%`}}/></div></div>
+            </article>
+
+            <article className="vf-last-card">
+              <div className="vf-card-title-row"><div><div className="vf-card-kicker">ÚLTIMA ACTIVIDAD</div><h3>Entrenamiento reciente</h3></div><button onClick={()=>setVista("historial")}>HISTORIAL</button></div>
+{ultimoRegistroHistorial ? (
+  <>
+    <strong className="vf-last-title">
+      {ultimoRegistroHistorial.nombre}
+    </strong>
+
+    <div className="vf-last-series">
+      {ultimoRegistroHistorial.series.slice(0, 3).map((serie: Serie, i: number) => (
+        <span key={i}>
+          {serie.kg || "0"} kg × {serie.reps || "0"} reps
+        </span>
+      ))}
+    </div>
+  </>
+) : (
+  <span>Sin entrenamientos registrados todavía</span>
+)}
+</article>
+
+            <article className="vf-creatine-home">
+              <div className="vf-card-kicker">GYM + CREATINA</div><h3>Constancia diaria</h3><div className="vf-creatine-circle"><strong>{estadisticasCreatina.porcentaje}%</strong><span>este mes</span></div><p>{estadisticasCreatina.tomadosMes} tomas registradas · mejor racha {estadisticasCreatina.mejorRacha}</p><button onClick={()=>setVista("calendario")}>ABRIR CALENDARIO</button>
+            </article>
           </section>
         </>}
 
@@ -1443,36 +1600,35 @@ async function cerrarSesion() {
         </>}
 
         {vista === "ajustes" && (
-  <>
-    <h1 className="vf-page-title">⚙ AJUSTES</h1>
+          <>
+            <h1 className="vf-page-title">⚙ AJUSTES</h1>
+            <div className="vf-settings-grid">
+              <section className="vf-section-card">
+                <h2 className="vf-settings-title">⏱️ DESCANSO PREDETERMINADO</h2>
+                <p className="vf-muted">Elige el tiempo que aparecerá por defecto. Si un ejercicio tiene un descanso propio, VitorFit respetará ese tiempo.</p>
+                <div className="vf-rest-options">
+                  {[90,120,150,180].map((seg)=><button key={seg} className={`vf-rest-choice ${ajustes.descanso===seg?"active":""}`} onClick={()=>setAjustes(a=>({...a,descanso:seg}))}>{seg===90?"1:30":seg===120?"2:00":seg===150?"2:30":"3:00"}</button>)}
+                </div>
+                <div className="vf-settings-note">Recomendación práctica: puedes dejar 2:30–3:00 para ejercicios compuestos y asignar menos tiempo individualmente a ejercicios aislados desde Rutinas.</div>
+              </section>
 
-    <section className="vf-section-card">
-      <h2>👤 CUENTA</h2>
-      <p className="vf-muted">
-        Gestiona tu sesión de VitorFit.
-      </p>
+              <section className="vf-section-card">
+                <h2 className="vf-settings-title">🏋️ ENTRENAMIENTO</h2>
+                <div className="vf-toggle-row"><div><strong>Comparar con última sesión</strong><div className="vf-muted">Muestra si mejoras peso o repeticiones.</div></div><button className={`vf-toggle ${ajustes.mostrarComparacion?"on":""}`} onClick={()=>setAjustes(a=>({...a,mostrarComparacion:!a.mostrarComparacion}))}>{ajustes.mostrarComparacion?"ACTIVADO":"DESACTIVADO"}</button></div>
+                <div className="vf-toggle-row"><div><strong>Mostrar RIR</strong><div className="vf-muted">Mantiene visible el objetivo de repeticiones en reserva.</div></div><button className={`vf-toggle ${ajustes.mostrarRir?"on":""}`} onClick={()=>setAjustes(a=>({...a,mostrarRir:!a.mostrarRir}))}>{ajustes.mostrarRir?"ACTIVADO":"DESACTIVADO"}</button></div>
+              </section>
+            </div>
 
-      <button
-        onClick={cerrarSesion}
-        style={{
-          width: "100%",
-          padding: "14px",
-          marginTop: "16px",
-          borderRadius: "12px",
-          border: "1px solid #D94B55",
-          background: "#1a0b16",
-          color: "#E8878E",
-          fontWeight: 900,
-          cursor: "pointer",
-        }}
-      >
-        🚪 CERRAR SESIÓN
-      </button>
-    </section>
-  </>
-)}
+            <section className="vf-section-card">
+              <h2 className="vf-settings-title">👤 CUENTA</h2>
+              <p className="vf-muted">Tu sesión y tus datos de VitorFit están asociados a tu usuario.</p>
+              <button onClick={cerrarSesion} style={{width:"100%",padding:"14px",marginTop:"16px",borderRadius:"12px",border:"1px solid #D94B55",background:"#1a0b16",color:"#E8878E",fontWeight:900,cursor:"pointer"}}>🚪 CERRAR SESIÓN</button>
+            </section>
+          </>
+        )}
       </div>
         
+        </div>
       {mensaje&&<div className="vf-message" onClick={()=>setMensaje("")}>{mensaje}</div>}
       <nav className="vf-bottom">
         <button className={`vf-nav ${vista==="inicio"?"active":""}`} onClick={()=>setVista("inicio")}><span>⌂</span>INICIO</button>
