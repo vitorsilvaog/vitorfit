@@ -633,13 +633,14 @@ if (modoReset) {
 
       setCargando(true);
 
-      const { error } = await supabase.auth.resetPasswordForEmail(
-        email.trim(),
-        {
-redirectTo: `${window.location.origin}/login`,        }
-      );
+const { error } = await supabase.auth.resetPasswordForEmail(
+  email.trim(),
+  {
+    redirectTo: `${window.location.origin}/update-password`,
+  }
+);
 
-      setCargando(false);
+setCargando(false);
 
       if (error) {
         setMensaje(`❌ ${error.message}`);
