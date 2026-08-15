@@ -19,41 +19,54 @@ export default function LoginPage() {
 const [nuevaPassword, setNuevaPassword] = useState("");
 const [repetirNuevaPassword, setRepetirNuevaPassword] = useState("");
 
-  // Si este dispositivo YA tiene una sesión válida,
-  // no hace falta volver a iniciar sesión.
   useEffect(() => {
-    let activo = true;
+  let activo = true;
 
-    const comprobarSesion = async () => {
-      const {
-        data: { session },
-      } = await supabase.auth.getSession();
+  const iniciar = async () => {
+    const params = new URLSearchParams(window.location.search);
+
+    // Supabase puede devolver el código de recuperación en ?code=
+    const code = params.get("code");
+
+    if (code) {
+      const { error } = await supabase.auth.exchangeCodeForSession(code);
 
       if (!activo) return;
 
-     const esReset =
-  new URLSearchParams(window.location.search).get("reset") === "true";
+      if (error) {
+        setMensaje("❌ El enlace de recuperación ha caducado o no es válido.");
+        setComprobandoSesion(false);
+        return;
+      }
 
-if (esReset) {
-  setModoReset(true);
-  setComprobandoSesion(false);
-  return;
-}
-
-if (session) {
-  router.replace("/entrenamiento");
-  return;
-}
-
+      setModoReset(true);
       setComprobandoSesion(false);
-    };
 
-    comprobarSesion();
+      // Limpiamos la URL sin cerrar la sesión de recuperación
+      window.history.replaceState({}, "", "/login");
+      return;
+    }
 
-    return () => {
-      activo = false;
-    };
-  }, [router, supabase]);
+    const {
+      data: { session },
+    } = await supabase.auth.getSession();
+
+    if (!activo) return;
+
+    if (session) {
+      router.replace("/entrenamiento");
+      return;
+    }
+
+    setComprobandoSesion(false);
+  };
+
+  iniciar();
+
+  return () => {
+    activo = false;
+  };
+}, [router, supabase]);
 
   const iniciarSesion = async () => {
     setMensaje("");
@@ -623,8 +636,7 @@ if (modoReset) {
       const { error } = await supabase.auth.resetPasswordForEmail(
         email.trim(),
         {
-          redirectTo: `${window.location.origin}/login?reset=true`,
-        }
+redirectTo: `${window.location.origin}/login`,        }
       );
 
       setCargando(false);
