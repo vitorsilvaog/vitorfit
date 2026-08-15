@@ -117,7 +117,7 @@ const [repetirNuevaPassword, setRepetirNuevaPassword] = useState("");
       email: email.trim(),
       password,
       options: {
-        emailRedirectTo: `${window.location.origin}/login`,
+        emailRedirectTo: `${window.location.origin}/update-password`,
       },
     });
 
