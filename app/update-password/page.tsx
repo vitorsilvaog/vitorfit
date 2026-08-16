@@ -15,25 +15,63 @@ export default function UpdatePasswordPage() {
   const [guardando, setGuardando] = useState(false);
 
   useEffect(() => {
+    let activo = true;
+
     const comprobarSesion = async () => {
       const {
         data: { session },
       } = await supabase.auth.getSession();
 
-      if (!session) {
-        setMensaje(
-          "❌ El enlace de recuperación no es válido o ha caducado."
-        );
+      if (!activo) return;
+
+      if (session) {
         setCargando(false);
         return;
       }
 
-      setCargando(false);
+      // Esperamos a que Supabase procese el enlace de recuperación
+      const timeout = setTimeout(async () => {
+        const {
+          data: { session: sesionFinal },
+        } = await supabase.auth.getSession();
+
+        if (!activo) return;
+
+        if (sesionFinal) {
+          setCargando(false);
+        } else {
+          setMensaje(
+            "❌ El enlace de recuperación no es válido o ha caducado."
+          );
+          setCargando(false);
+        }
+      }, 1500);
+
+      return () => clearTimeout(timeout);
     };
 
     comprobarSesion();
-  }, [supabase]);
 
+    const {
+      data: { subscription },
+    } = supabase.auth.onAuthStateChange((event, session) => {
+      if (!activo) return;
+
+      if (
+        event === "PASSWORD_RECOVERY" ||
+        event === "SIGNED_IN" ||
+        session
+      ) {
+        setCargando(false);
+        setMensaje("");
+      }
+    });
+
+    return () => {
+      activo = false;
+      subscription.unsubscribe();
+    };
+  }, [supabase]);
   const guardarNuevaPassword = async () => {
     setMensaje("");
 
