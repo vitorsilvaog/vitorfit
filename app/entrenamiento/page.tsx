@@ -75,6 +75,35 @@ type CalendarEntry = {
 type CalendarMap = Record<string, CalendarEntry>;
 type CreatinaMap = Record<string, boolean>;
 
+type NutritionCategory = "desayuno" | "comida" | "snack" | "cena";
+
+type NutritionMeal = {
+  id: string;
+  name: string;
+  category: NutritionCategory;
+  description: string | null;
+  image_url: string | null;
+  calories: number;
+  protein: number;
+  carbs: number;
+  fats: number;
+  ingredients: Array<{ nombre: string; cantidad: string }>;
+  preparation: string | null;
+  published: boolean;
+  created_by: string;
+  created_at?: string;
+  updated_at?: string;
+};
+
+type MealPlanEntry = {
+  id: string;
+  user_id: string;
+  meal_id: string;
+  plan_date: string;
+  meal_type: NutritionCategory;
+  nutrition_meals?: NutritionMeal | null;
+};
+
 type Family = {
   musculo: string;
   patron: string;
@@ -615,6 +644,13 @@ const keyUsuarioActual = "vitorfit-usuario-actual";
 
 const uid = (prefix: string) => `${prefix}-${Date.now()}-${Math.random().toString(36).slice(2, 8)}`;
 const clone = <T,>(value: T): T => JSON.parse(JSON.stringify(value));
+const NUTRITION_ADMIN_ID = "95250377-5141-49fc-ae6c-27db3f25f9e3";
+const NUTRITION_LABELS: Record<NutritionCategory, string> = {
+  desayuno: "Desayunos",
+  comida: "Comidas",
+  snack: "Meriendas",
+  cena: "Cenas",
+};
 export default function Entrenamiento() {
 const supabase = useMemo(() => createClient(), []);
 const router = useRouter();
@@ -623,7 +659,30 @@ async function cerrarSesion() {
   await supabase.auth.signOut();
   window.location.href = "/login";
 }
-  const [vista, setVista] = useState<"inicio" | "entreno" | "historial" | "progreso" | "rutinas" | "biblioteca" | "calendario" | "ajustes">("inicio");
+  const [vista, setVista] = useState<"inicio" | "entreno" | "historial" | "progreso" | "rutinas" | "biblioteca" | "nutricion" | "calendario" | "ajustes">("inicio");
+  const [seccionNutricion, setSeccionNutricion] = useState<"inicio" | NutritionCategory | "plan">("inicio");
+  const [platosNutricion, setPlatosNutricion] = useState<NutritionMeal[]>([]);
+  const [planNutricion, setPlanNutricion] = useState<MealPlanEntry[]>([]);
+  const [cargandoNutricion, setCargandoNutricion] = useState(false);
+  const [busquedaNutricion, setBusquedaNutricion] = useState("");
+  const [platoAbiertoId, setPlatoAbiertoId] = useState<string | null>(null);
+  const [mostrarEditorPlato, setMostrarEditorPlato] = useState(false);
+  const [editandoPlatoId, setEditandoPlatoId] = useState<string | null>(null);
+  const [archivoNutricion, setArchivoNutricion] = useState<File | null>(null);
+  const [platoParaPlan, setPlatoParaPlan] = useState<NutritionMeal | null>(null);
+  const [fechaPlanNutricion, setFechaPlanNutricion] = useState(() => new Date().toISOString().slice(0,10));
+  const [tipoPlanNutricion, setTipoPlanNutricion] = useState<NutritionCategory>("desayuno");
+  const [semanaNutricion, setSemanaNutricion] = useState(() => {
+    const d = new Date();
+    const day = (d.getDay() + 6) % 7;
+    d.setDate(d.getDate() - day);
+    d.setHours(0,0,0,0);
+    return d;
+  });
+  const [formPlato, setFormPlato] = useState({
+    name: "", category: "desayuno" as NutritionCategory, description: "", image_url: "",
+    calories: "", protein: "", carbs: "", fats: "", ingredients: "", preparation: "", published: true,
+  });
   const [rutinas, setRutinas] = useState<Routine[]>(clone(DEFAULT_ROUTINES));
   const [rutinaActualId, setRutinaActualId] = useState(DEFAULT_ROUTINES[0].id);
   const [diaActualIndex, setDiaActualIndex] = useState(0);
@@ -1205,6 +1264,157 @@ useEffect(() => {
   };
 
 
+  const esAdminNutricion = userId === NUTRITION_ADMIN_ID;
+
+  const cargarNutricion = async () => {
+    if (!userId) return;
+    setCargandoNutricion(true);
+    const [{ data: meals, error: mealsError }, { data: plan, error: planError }] = await Promise.all([
+      supabase.from("nutrition_meals").select("*").order("created_at", { ascending: false }),
+      supabase.from("user_meal_plan").select("id,user_id,meal_id,plan_date,meal_type,nutrition_meals(*)").order("plan_date", { ascending: true }),
+    ]);
+    if (mealsError) console.error("VitorFit nutrición: platos", mealsError);
+    if (planError) console.error("VitorFit nutrición: plan", planError);
+    setPlatosNutricion((meals ?? []).map((m: any) => ({ ...m, ingredients: Array.isArray(m.ingredients) ? m.ingredients : [] })) as NutritionMeal[]);
+    setPlanNutricion((plan ?? []) as unknown as MealPlanEntry[]);
+    setCargandoNutricion(false);
+  };
+
+  useEffect(() => {
+    if (!userId) return;
+    cargarNutricion();
+  }, [userId]);
+
+  const abrirNutricion = (seccion: "inicio" | NutritionCategory | "plan" = "inicio") => {
+    setSeccionNutricion(seccion);
+    setVista("nutricion");
+    if (userId) cargarNutricion();
+  };
+
+  const resetFormPlato = () => {
+    setEditandoPlatoId(null);
+    setArchivoNutricion(null);
+    setFormPlato({ name: "", category: "desayuno", description: "", image_url: "", calories: "", protein: "", carbs: "", fats: "", ingredients: "", preparation: "", published: true });
+  };
+
+  const ingredientesDesdeTexto = (texto: string) => texto
+    .split("\n")
+    .map((linea) => linea.trim())
+    .filter(Boolean)
+    .map((linea) => {
+      const [cantidad, ...resto] = linea.split("|");
+      return resto.length ? { cantidad: cantidad.trim(), nombre: resto.join("|").trim() } : { cantidad: "", nombre: linea };
+    });
+
+  const textoDesdeIngredientes = (ingredientes: Array<{nombre:string;cantidad:string}>) =>
+    (ingredientes ?? []).map((i) => i.cantidad ? `${i.cantidad} | ${i.nombre}` : i.nombre).join("\n");
+
+  const guardarPlatoNutricion = async () => {
+    if (!esAdminNutricion || !userId) return;
+    if (!formPlato.name.trim()) { setMensaje("⚠️ Pon un nombre al plato."); return; }
+    setCargandoNutricion(true);
+    let imageUrl = formPlato.image_url || null;
+
+    if (archivoNutricion) {
+      const ext = archivoNutricion.name.split(".").pop() || "jpg";
+      const ruta = `${formPlato.category}/${Date.now()}-${slug(formPlato.name)}.${ext}`;
+      const { error: uploadError } = await supabase.storage.from("nutrition-images").upload(ruta, archivoNutricion, { upsert: true });
+      if (uploadError) {
+        setMensaje(`❌ No pude subir la foto: ${uploadError.message}`);
+        setCargandoNutricion(false);
+        return;
+      }
+      const { data: publicData } = supabase.storage.from("nutrition-images").getPublicUrl(ruta);
+      imageUrl = publicData.publicUrl;
+    }
+
+    const payload = {
+      name: formPlato.name.trim(),
+      category: formPlato.category,
+      description: formPlato.description.trim() || null,
+      image_url: imageUrl,
+      calories: Number(formPlato.calories || 0),
+      protein: Number(formPlato.protein || 0),
+      carbs: Number(formPlato.carbs || 0),
+      fats: Number(formPlato.fats || 0),
+      ingredients: ingredientesDesdeTexto(formPlato.ingredients),
+      preparation: formPlato.preparation.trim() || null,
+      published: formPlato.published,
+      created_by: userId,
+      updated_at: new Date().toISOString(),
+    };
+
+    const query = editandoPlatoId
+      ? supabase.from("nutrition_meals").update(payload).eq("id", editandoPlatoId)
+      : supabase.from("nutrition_meals").insert(payload);
+    const { error } = await query;
+    setCargandoNutricion(false);
+    if (error) { setMensaje(`❌ ${error.message}`); return; }
+    setMensaje(editandoPlatoId ? "✅ Plato actualizado" : "✅ Plato publicado en Nutrición");
+    setMostrarEditorPlato(false);
+    resetFormPlato();
+    await cargarNutricion();
+  };
+
+  const editarPlatoNutricion = (m: NutritionMeal) => {
+    if (!esAdminNutricion) return;
+    setEditandoPlatoId(m.id);
+    setArchivoNutricion(null);
+    setFormPlato({
+      name: m.name, category: m.category, description: m.description ?? "", image_url: m.image_url ?? "",
+      calories: String(m.calories ?? 0), protein: String(m.protein ?? 0), carbs: String(m.carbs ?? 0), fats: String(m.fats ?? 0),
+      ingredients: textoDesdeIngredientes(m.ingredients ?? []), preparation: m.preparation ?? "", published: m.published,
+    });
+    setMostrarEditorPlato(true);
+    setSeccionNutricion(m.category);
+  };
+
+  const borrarPlatoNutricion = async (m: NutritionMeal) => {
+    if (!esAdminNutricion) return;
+    if (!window.confirm(`¿Borrar ${m.name}?`)) return;
+    const { error } = await supabase.from("nutrition_meals").delete().eq("id", m.id);
+    if (error) { setMensaje(`❌ ${error.message}`); return; }
+    setMensaje("🗑️ Plato eliminado");
+    await cargarNutricion();
+  };
+
+  const prepararAñadirPlan = (m: NutritionMeal) => {
+    setPlatoParaPlan(m);
+    setTipoPlanNutricion(m.category);
+    setFechaPlanNutricion(new Date().toISOString().slice(0,10));
+  };
+
+  const añadirPlatoAlPlan = async () => {
+    if (!userId || !platoParaPlan) return;
+    const { error } = await supabase.from("user_meal_plan").insert({
+      user_id: userId, meal_id: platoParaPlan.id, plan_date: fechaPlanNutricion, meal_type: tipoPlanNutricion,
+    });
+    if (error) { setMensaje(`❌ ${error.message}`); return; }
+    setMensaje(`✅ ${platoParaPlan.name} añadido al plan`);
+    setPlatoParaPlan(null);
+    await cargarNutricion();
+  };
+
+  const quitarDelPlan = async (id: string) => {
+    const { error } = await supabase.from("user_meal_plan").delete().eq("id", id);
+    if (error) { setMensaje(`❌ ${error.message}`); return; }
+    await cargarNutricion();
+  };
+
+  const moverSemanaNutricion = (delta: number) => setSemanaNutricion((prev) => {
+    const d = new Date(prev); d.setDate(d.getDate() + delta * 7); return d;
+  });
+
+  const diasSemanaNutricion = useMemo(() => Array.from({ length: 7 }, (_, i) => {
+    const d = new Date(semanaNutricion); d.setDate(d.getDate() + i); return d;
+  }), [semanaNutricion]);
+
+  const platosFiltradosNutricion = useMemo(() => {
+    if (seccionNutricion === "inicio" || seccionNutricion === "plan") return [];
+    const q = busquedaNutricion.trim().toLowerCase();
+    return platosNutricion.filter((m) => m.category === seccionNutricion && (esAdminNutricion || m.published) && (!q || `${m.name} ${m.description ?? ""}`.toLowerCase().includes(q)));
+  }, [platosNutricion, seccionNutricion, busquedaNutricion, esAdminNutricion]);
+
   const normalizarZona = (valor: string) =>
     (valor || "")
       .normalize("NFD")
@@ -1349,8 +1559,9 @@ useEffect(() => {
         .vf-compare-grid{display:grid;grid-template-columns:1fr 1fr;gap:10px;padding:0 15px 12px}.vf-panel{padding:12px;border:1px solid #292d34;border-radius:11px;background:#0e1014}.vf-panel.today{border-color:rgba(255,48,74,.38)}.vf-panel-head{display:flex;justify-content:space-between;gap:8px;font-size:10px;font-weight:900;margin-bottom:9px}.vf-date{color:#6f7680}.vf-series-row{display:grid;grid-template-columns:30px repeat(3,1fr);gap:6px;align-items:center;margin-bottom:6px}.vf-slabel{color:var(--red);font-weight:1000}.vf-box,.vf-input{min-height:46px;border:1px solid #30353d;border-radius:8px;background:#0b0d10;color:#fff;text-align:center}.vf-box{display:grid;place-content:center}.vf-box small{font-size:7px;color:#666d76}.vf-input{width:100%;outline:none}.vf-input:focus,.vf-text:focus{border-color:var(--red)}.vf-compare{grid-column:2/5;color:#ff7484;font-size:8px}.vf-card-actions{display:grid;grid-template-columns:1fr 180px;gap:9px;padding:0 15px 15px}.vf-save,.vf-primary,.vf-creatine-button{border:0;background:linear-gradient(135deg,var(--red2),var(--red));color:#fff}.vf-save,.vf-rest{min-height:45px;border-radius:9px;font-weight:1000}.vf-rest{border:1px solid #30353d;background:#111419;color:#fff}
         .vf-page-title{font-size:32px;margin:12px 0 20px}.vf-page-title:after{content:"";display:block;width:46px;height:3px;background:var(--red);margin-top:8px}.vf-section-card{padding:16px;border-radius:13px;margin-bottom:11px}.vf-muted{color:#777e88;font-size:10px}.vf-history-ex{display:grid;grid-template-columns:1fr auto;gap:10px;padding:10px 0;border-bottom:1px solid #292d34}.vf-mini-series{display:flex;gap:5px;flex-wrap:wrap;margin-top:7px}.vf-mini-chip{padding:5px 7px;border:1px solid #30353d;border-radius:7px;font-size:8px}.vf-progress-grid{display:grid;grid-template-columns:repeat(3,1fr);gap:10px}.vf-record{padding:14px;border-radius:12px}.vf-record-big{font-size:24px;color:var(--red);font-weight:1000}.vf-toolbar{display:flex;gap:8px;flex-wrap:wrap;margin-bottom:12px}.vf-primary,.vf-secondary,.vf-danger{padding:10px 12px;border-radius:9px;font-weight:900}.vf-secondary{border:1px solid #30353d;background:#15181d;color:#fff}.vf-danger{border:1px solid #71323a;background:#29171b;color:#ff9aa6}.vf-routines{display:grid;grid-template-columns:repeat(2,1fr);gap:12px}.vf-routine-day{padding:15px;border-radius:13px}.vf-routine-list{padding:0;list-style:none}.vf-routine-list li{padding:8px 0;border-top:1px solid #292d34;font-size:10px}.vf-editor{padding:16px;border-radius:14px}.vf-editor-head,.vf-library-head{display:grid;grid-template-columns:1fr 1fr;gap:8px}.vf-day-tabs{display:flex;gap:7px;flex-wrap:wrap;margin:12px 0}.vf-day-tab,.vf-edit-controls button{border:1px solid #30353d;background:#15181d;color:#fff;border-radius:8px;padding:8px}.vf-day-tab.active{border-color:var(--red)}.vf-edit-ex{display:grid;grid-template-columns:30px 1fr 80px 80px 70px auto;gap:7px;align-items:center;padding:9px 0;border-top:1px solid #292d34}.vf-text{width:100%;border:1px solid #30353d;background:#0d0f13;color:#fff;border-radius:8px;padding:10px;outline:none}.vf-library-head{grid-template-columns:2fr repeat(3,1fr)}.vf-library-grid{display:grid;grid-template-columns:repeat(3,1fr);gap:10px}.vf-lib-card{padding:12px;border-radius:12px}.vf-lib-meta,.vf-lib-muscle{font-size:9px;color:#777e88}.vf-lib-muscle{color:#ff7484}.vf-custom-form{display:grid;grid-template-columns:2fr repeat(4,1fr);gap:7px;margin:10px 0}.vf-anatomy-editor{display:grid;grid-template-columns:1fr auto;gap:7px}.vf-settings-grid{display:grid;grid-template-columns:1fr 1fr;gap:12px}.vf-toggle-row{display:flex;justify-content:space-between;gap:12px;align-items:center;padding:12px 0;border-top:1px solid #292d34}.vf-toggle,.vf-rest-choice{border:1px solid #30353d;background:#111419;color:#aaa;border-radius:8px;padding:9px}.vf-toggle.on,.vf-rest-choice.active{border-color:var(--red);color:#fff;background:rgba(255,48,74,.08)}.vf-rest-options{display:grid;grid-template-columns:repeat(4,1fr);gap:7px;margin-top:12px}.vf-settings-note{color:#777e88;font-size:9px;margin-top:10px}
         .vf-calendar-top{display:grid;grid-template-columns:1fr auto;gap:12px}.vf-calendar-month{display:flex;align-items:center;gap:8px}.vf-calendar-month button{width:38px;height:38px;border:1px solid #30353d;background:#111419;color:#fff;border-radius:8px}.vf-calendar-title{font-size:18px;font-weight:1000}.vf-calendar-controls{display:grid;grid-template-columns:1fr 1fr;gap:8px}.vf-calendar-stats,.vf-creatine-summary{display:grid;grid-template-columns:repeat(3,1fr);gap:8px;margin:12px 0}.vf-creatine-summary{grid-template-columns:repeat(4,1fr)}.vf-calendar-stat,.vf-creatine-stat{padding:12px;border:1px solid var(--line);border-radius:10px;background:#111419;text-align:center}.vf-calendar-stat strong,.vf-creatine-stat strong{display:block;color:var(--red);font-size:20px}.vf-calendar-week,.vf-calendar-grid{display:grid;grid-template-columns:repeat(7,1fr);gap:6px}.vf-calendar-week div{text-align:center;color:#666d76;font-size:9px}.vf-cal-day{min-height:105px;padding:8px;border:1px solid #292d34;border-radius:9px;background:#111419}.vf-cal-day.today,.vf-cal-day.done{border-color:var(--red)}.vf-cal-badge{font-size:8px;color:#ff7484;margin-top:7px}.vf-cal-open,.vf-creatine-day{width:100%;margin-top:7px;padding:5px;border:1px solid #30353d;border-radius:6px;background:#0d0f13;color:#fff;font-size:8px}.vf-creatine-day.taken{border-color:var(--red);background:rgba(255,48,74,.10)}.vf-creatine-note,.vf-calendar-help{color:#777e88;font-size:9px;line-height:1.5}.vf-message{position:fixed;left:50%;bottom:80px;transform:translateX(-50%);z-index:99;padding:10px 14px;border:1px solid var(--red);border-radius:9px;background:#111419;color:#fff;font-size:10px}.vf-bottom{display:none}
-        @media(max-width:1050px){.vf-shell{grid-template-columns:210px 1fr}.vf-content{padding:22px 24px 100px}.vf-home-metrics{grid-template-columns:1fr 1fr}.vf-home-grid{grid-template-columns:1fr}.vf-next-workout{grid-row:auto}.vf-library-grid{grid-template-columns:1fr 1fr}}
-        @media(max-width:760px){.vf-shell{display:block}.vf-sidebar{display:none}.vf-content{padding:14px 12px 110px}.vf-topbar{grid-template-columns:1fr auto}.vf-brand{display:flex;align-items:center;gap:8px}.vf-logo{width:42px;height:42px}.vf-brand-title{font-weight:1000}.vf-brand-title span{color:var(--red)}.vf-brand-sub{font-size:7px;color:#666d76}.vf-day{grid-column:1/-1;grid-row:2}.vf-actions{display:none}.vf-dashboard-head{align-items:flex-start;flex-direction:column}.vf-dashboard-head h1{font-size:38px}.vf-hero-cta{width:100%}.vf-home-metrics{grid-template-columns:1fr 1fr}.vf-stats{grid-template-columns:1fr 1fr}.vf-stat:nth-child(2){border-right:0}.vf-stat:nth-child(-n+2){border-bottom:1px solid var(--line)}.vf-compare-grid{grid-template-columns:1fr}.vf-card-actions{grid-template-columns:1fr}.vf-routines,.vf-progress-grid{grid-template-columns:1fr}.vf-library-head,.vf-custom-form,.vf-editor-head,.vf-settings-grid{grid-template-columns:1fr}.vf-library-grid{grid-template-columns:1fr}.vf-bottom{position:fixed;display:grid;grid-template-columns:repeat(4,1fr);left:6px;right:6px;bottom:6px;z-index:80;border:1px solid #2a2e35;border-radius:13px;overflow:hidden;background:rgba(13,15,19,.96);backdrop-filter:blur(16px)}.vf-nav{min-height:54px;border:0;background:transparent;color:#777e88;font-size:7px}.vf-nav span{display:block;font-size:16px;margin-bottom:3px}.vf-nav.active{color:#fff;background:rgba(255,48,74,.10);box-shadow:inset 0 -2px 0 var(--red)}.vf-calendar-top{grid-template-columns:1fr}.vf-calendar-controls{grid-template-columns:1fr}.vf-cal-day{min-height:82px;padding:5px}.vf-cal-open{display:none}.vf-edit-ex{grid-template-columns:28px 1fr 58px 58px 58px}.vf-edit-controls{grid-column:2/-1}}
+        .vf-nutrition-hero{display:flex;justify-content:space-between;align-items:flex-end;gap:18px;margin-bottom:20px}.vf-nutrition-hero h1{margin:4px 0;font-size:clamp(30px,4vw,50px)}.vf-nutrition-hero p{margin:0;color:#7f858f}.vf-nutrition-categories{display:grid;grid-template-columns:repeat(4,1fr);gap:12px}.vf-nutrition-cat{border:1px solid var(--line);border-radius:16px;background:linear-gradient(145deg,#15181d,#0f1115);padding:22px;text-align:left;color:#fff;min-height:160px}.vf-nutrition-cat:hover{border-color:rgba(255,48,74,.45);transform:translateY(-1px)}.vf-nutrition-cat span{font-size:30px}.vf-nutrition-cat h3{font-size:20px;margin:12px 0 5px}.vf-nutrition-cat p{margin:0;color:#727983;font-size:10px}.vf-nutrition-plan-card{margin-top:12px;border:1px solid rgba(255,48,74,.32);border-radius:16px;padding:22px;background:linear-gradient(120deg,rgba(255,48,74,.10),#111318);display:flex;justify-content:space-between;align-items:center;gap:20px}.vf-nutrition-plan-card h3{margin:0 0 6px}.vf-nutrition-toolbar{display:flex;gap:9px;flex-wrap:wrap;margin:14px 0}.vf-nutrition-grid{display:grid;grid-template-columns:repeat(3,minmax(0,1fr));gap:14px}.vf-meal-card{border:1px solid var(--line);border-radius:16px;background:#111318;overflow:hidden}.vf-meal-image{width:100%;aspect-ratio:16/10;object-fit:cover;background:#0b0d11}.vf-meal-placeholder{width:100%;aspect-ratio:16/10;display:grid;place-items:center;background:linear-gradient(145deg,#17191f,#0d0f13);font-size:46px}.vf-meal-body{padding:16px}.vf-meal-body h3{margin:0 0 5px;font-size:18px}.vf-meal-macros{display:grid;grid-template-columns:repeat(4,1fr);gap:6px;margin:13px 0}.vf-meal-macros div{background:#0d0f13;border:1px solid #252932;border-radius:8px;padding:8px;text-align:center}.vf-meal-macros strong{display:block;font-size:12px}.vf-meal-macros small{color:#6e7580;font-size:7px}.vf-meal-actions{display:flex;gap:7px;flex-wrap:wrap}.vf-meal-detail{margin-top:14px;border-top:1px solid #242830;padding-top:13px}.vf-meal-detail h4{color:var(--red);margin:10px 0 7px}.vf-meal-detail ul{margin:0;padding-left:18px;color:#c5c8ce;font-size:11px;line-height:1.7;white-space:normal}.vf-meal-prep{white-space:pre-wrap;color:#c5c8ce;font-size:11px;line-height:1.7}.vf-admin-badge{display:inline-flex;padding:4px 7px;border-radius:6px;background:rgba(255,48,74,.12);border:1px solid rgba(255,48,74,.3);color:#ff7586;font-size:8px;font-weight:900}.vf-nutrition-form{display:grid;gap:10px;margin:15px 0}.vf-nutrition-form-grid{display:grid;grid-template-columns:2fr 1fr 1fr 1fr 1fr;gap:8px}.vf-nutrition-form textarea{min-height:120px;resize:vertical}.vf-plan-modal{border:1px solid rgba(255,48,74,.35);border-radius:14px;background:#12151a;padding:16px;margin:14px 0}.vf-plan-modal-grid{display:grid;grid-template-columns:1fr 1fr auto;gap:8px;align-items:end}.vf-week-plan-head{display:flex;justify-content:space-between;align-items:center;gap:10px;margin:14px 0}.vf-week-plan-head div{font-weight:900;text-transform:capitalize}.vf-meal-week{display:grid;grid-template-columns:repeat(7,minmax(160px,1fr));gap:10px;overflow-x:auto;padding-bottom:8px}.vf-meal-day{border:1px solid var(--line);border-radius:13px;background:#111318;padding:10px;min-width:160px}.vf-meal-day h4{margin:0 0 10px;color:#fff}.vf-meal-day h4 span{display:block;color:#6d747e;font-size:8px;margin-top:3px}.vf-meal-slot{border-top:1px solid #242830;padding:8px 0}.vf-meal-slot:first-of-type{border-top:0}.vf-meal-slot>small{color:var(--red);font-size:7px;font-weight:900}.vf-plan-item{display:flex;justify-content:space-between;gap:6px;align-items:flex-start;margin-top:5px;font-size:9px}.vf-plan-item button{border:0;background:transparent;color:#8a9099;padding:0}.vf-back-nutrition{margin-bottom:12px}.vf-unpublished{opacity:.65;outline:1px dashed #555}.vf-publish-chip{color:#f0b75d;font-size:8px;font-weight:900}
+        @media(max-width:1050px){.vf-shell{grid-template-columns:210px 1fr}.vf-content{padding:22px 24px 100px}.vf-home-metrics{grid-template-columns:1fr 1fr}.vf-home-grid{grid-template-columns:1fr}.vf-next-workout{grid-row:auto}.vf-library-grid{grid-template-columns:1fr 1fr}.vf-nutrition-categories{grid-template-columns:1fr 1fr}.vf-nutrition-grid{grid-template-columns:1fr 1fr}}
+        @media(max-width:760px){.vf-shell{display:block}.vf-sidebar{display:none}.vf-content{padding:14px 12px 110px}.vf-topbar{grid-template-columns:1fr auto}.vf-brand{display:flex;align-items:center;gap:8px}.vf-logo{width:42px;height:42px}.vf-brand-title{font-weight:1000}.vf-brand-title span{color:var(--red)}.vf-brand-sub{font-size:7px;color:#666d76}.vf-day{grid-column:1/-1;grid-row:2}.vf-actions{display:none}.vf-dashboard-head{align-items:flex-start;flex-direction:column}.vf-dashboard-head h1{font-size:38px}.vf-hero-cta{width:100%}.vf-home-metrics{grid-template-columns:1fr 1fr}.vf-stats{grid-template-columns:1fr 1fr}.vf-stat:nth-child(2){border-right:0}.vf-stat:nth-child(-n+2){border-bottom:1px solid var(--line)}.vf-compare-grid{grid-template-columns:1fr}.vf-card-actions{grid-template-columns:1fr}.vf-routines,.vf-progress-grid{grid-template-columns:1fr}.vf-library-head,.vf-custom-form,.vf-editor-head,.vf-settings-grid{grid-template-columns:1fr}.vf-library-grid{grid-template-columns:1fr}.vf-nutrition-categories,.vf-nutrition-grid{grid-template-columns:1fr}.vf-nutrition-form-grid,.vf-plan-modal-grid{grid-template-columns:1fr}.vf-nutrition-plan-card,.vf-nutrition-hero{align-items:stretch;flex-direction:column}.vf-bottom{position:fixed;display:grid;grid-template-columns:repeat(5,1fr);left:6px;right:6px;bottom:6px;z-index:80;border:1px solid #2a2e35;border-radius:13px;overflow:hidden;background:rgba(13,15,19,.96);backdrop-filter:blur(16px)}.vf-nav{min-height:54px;border:0;background:transparent;color:#777e88;font-size:7px}.vf-nav span{display:block;font-size:16px;margin-bottom:3px}.vf-nav.active{color:#fff;background:rgba(255,48,74,.10);box-shadow:inset 0 -2px 0 var(--red)}.vf-calendar-top{grid-template-columns:1fr}.vf-calendar-controls{grid-template-columns:1fr}.vf-cal-day{min-height:82px;padding:5px}.vf-cal-open{display:none}.vf-edit-ex{grid-template-columns:28px 1fr 58px 58px 58px}.vf-edit-controls{grid-column:2/-1}}
         @media(max-width:500px){.vf-home-metrics{grid-template-columns:1fr}.vf-home-grid>article{padding:16px}.vf-card-head{grid-template-columns:auto 1fr auto;padding:11px}.vf-anatomia-pro{width:70px;min-width:70px;height:82px}.vf-ex-title{font-size:14px}.vf-alt-list{grid-template-columns:1fr}.vf-series-row{grid-template-columns:25px repeat(3,1fr);gap:4px}.vf-panel{padding:8px}.vf-calendar-stats{grid-template-columns:repeat(3,1fr)}.vf-creatine-summary{grid-template-columns:1fr 1fr}.vf-calendar-grid,.vf-calendar-week{gap:3px}.vf-cal-day{min-height:70px}.vf-cal-badge{font-size:6px}.vf-rest-options{grid-template-columns:1fr 1fr}}
 
 
@@ -1394,6 +1605,10 @@ useEffect(() => {
         }}
       >
         <span>▦</span><b>Biblioteca</b>
+      </button>
+
+      <button className={vista === "nutricion" ? "active" : ""} onClick={() => abrirNutricion("inicio")}>
+        <span>🍽️</span><b>Nutrición</b>
       </button>
 
       <button className={vista === "calendario" ? "active" : ""} onClick={() => setVista("calendario")}>
@@ -1556,6 +1771,43 @@ useEffect(() => {
 </details>
 {targetBiblioteca&&<button className="vf-primary" onClick={()=>añadirDesdeBiblioteca(ex)}>＋ AÑADIR</button>}</div>)}</div>{!resultadosBiblioteca.length&&<div className="vf-section-card">No encontré ejercicios con esos filtros.</div>}</>}
 
+        {vista === "nutricion" && <>
+          {seccionNutricion === "inicio" && <>
+            <section className="vf-nutrition-hero">
+              <div><div className="vf-eyebrow">VITORFIT NUTRICIÓN</div><h1>Nutrición</h1><p>Elige un plato y añádelo a tu plan semanal.</p></div>
+              {esAdminNutricion && <button className="vf-primary" onClick={()=>{resetFormPlato();setMostrarEditorPlato(true)}}>＋ CREAR PLATO</button>}
+            </section>
+            <div className="vf-nutrition-categories">
+              <button className="vf-nutrition-cat" onClick={()=>setSeccionNutricion("desayuno")}><span>🍳</span><h3>Desayunos</h3><p>Ideas para empezar el día.</p></button>
+              <button className="vf-nutrition-cat" onClick={()=>setSeccionNutricion("comida")}><span>🍛</span><h3>Comidas</h3><p>Platos completos y equilibrados.</p></button>
+              <button className="vf-nutrition-cat" onClick={()=>setSeccionNutricion("snack")}><span>🍓</span><h3>Meriendas</h3><p>Opciones fáciles para media tarde.</p></button>
+              <button className="vf-nutrition-cat" onClick={()=>setSeccionNutricion("cena")}><span>🌙</span><h3>Cenas</h3><p>Opciones para terminar el día.</p></button>
+            </div>
+            <div className="vf-nutrition-plan-card"><div><div className="vf-card-kicker">TU ORGANIZACIÓN</div><h3>📅 Plan semanal</h3><p className="vf-muted">Organiza desayuno, comida, merienda y cena de lunes a domingo.</p></div><button className="vf-primary" onClick={()=>setSeccionNutricion("plan")}>ABRIR PLAN SEMANAL</button></div>
+          </>}
+
+          {seccionNutricion !== "inicio" && seccionNutricion !== "plan" && <>
+            <button className="vf-secondary vf-back-nutrition" onClick={()=>setSeccionNutricion("inicio")}>← VOLVER A NUTRICIÓN</button>
+            <div className="vf-nutrition-hero"><div><div className="vf-eyebrow">NUTRICIÓN</div><h1>{seccionNutricion === "snack" ? "🍓 Meriendas" : seccionNutricion === "desayuno" ? "🍳 Desayunos" : seccionNutricion === "comida" ? "🍛 Comidas" : "🌙 Cenas"}</h1><p>{platosFiltradosNutricion.length} platos disponibles</p></div>{esAdminNutricion&&<button className="vf-primary" onClick={()=>{resetFormPlato();setFormPlato(f=>({...f,category:seccionNutricion}));setMostrarEditorPlato(true)}}>＋ NUEVO PLATO</button>}</div>
+            <div className="vf-nutrition-toolbar"><input className="vf-text" placeholder="🔎 Buscar plato..." value={busquedaNutricion} onChange={e=>setBusquedaNutricion(e.target.value)}/><button className="vf-secondary" onClick={cargarNutricion}>↻ ACTUALIZAR</button></div>
+
+            {mostrarEditorPlato && esAdminNutricion && <section className="vf-section-card"><div className="vf-toolbar" style={{justifyContent:"space-between"}}><div><span className="vf-admin-badge">ADMINISTRADOR</span><h2 style={{margin:"8px 0 0"}}>{editandoPlatoId?"Editar plato":"Crear plato"}</h2></div><button className="vf-secondary" onClick={()=>{setMostrarEditorPlato(false);resetFormPlato()}}>✕ CERRAR</button></div><div className="vf-nutrition-form"><div className="vf-nutrition-form-grid"><input className="vf-text" placeholder="Nombre del plato" value={formPlato.name} onChange={e=>setFormPlato(f=>({...f,name:e.target.value}))}/><select className="vf-text" value={formPlato.category} onChange={e=>setFormPlato(f=>({...f,category:e.target.value as NutritionCategory}))}><option value="desayuno">Desayuno</option><option value="comida">Comida</option><option value="snack">Merienda</option><option value="cena">Cena</option></select><input className="vf-text" type="number" placeholder="kcal" value={formPlato.calories} onChange={e=>setFormPlato(f=>({...f,calories:e.target.value}))}/><input className="vf-text" type="number" placeholder="Proteína g" value={formPlato.protein} onChange={e=>setFormPlato(f=>({...f,protein:e.target.value}))}/><input className="vf-text" type="number" placeholder="Carbos g" value={formPlato.carbs} onChange={e=>setFormPlato(f=>({...f,carbs:e.target.value}))}/></div><div className="vf-nutrition-form-grid" style={{gridTemplateColumns:"1fr 2fr 1fr"}}><input className="vf-text" type="number" placeholder="Grasas g" value={formPlato.fats} onChange={e=>setFormPlato(f=>({...f,fats:e.target.value}))}/><input className="vf-text" placeholder="Descripción" value={formPlato.description} onChange={e=>setFormPlato(f=>({...f,description:e.target.value}))}/><label className="vf-text" style={{display:"flex",alignItems:"center",gap:8}}><input type="checkbox" checked={formPlato.published} onChange={e=>setFormPlato(f=>({...f,published:e.target.checked}))}/> Publicado</label></div><label className="vf-muted">Foto del plato<input className="vf-text" style={{display:"block",width:"100%",marginTop:6}} type="file" accept="image/*" onChange={e=>setArchivoNutricion(e.target.files?.[0]??null)}/></label><textarea className="vf-text" placeholder={'Ingredientes: una línea por ingrediente. Ejemplo:\n60 g | Avena\n200 ml | Leche'} value={formPlato.ingredients} onChange={e=>setFormPlato(f=>({...f,ingredients:e.target.value}))}/><textarea className="vf-text" placeholder="Preparación paso a paso..." value={formPlato.preparation} onChange={e=>setFormPlato(f=>({...f,preparation:e.target.value}))}/><button className="vf-primary" disabled={cargandoNutricion} onClick={guardarPlatoNutricion}>{cargandoNutricion?"GUARDANDO...":editandoPlatoId?"GUARDAR CAMBIOS":"PUBLICAR PLATO"}</button></div></section>}
+
+            {platoParaPlan && <div className="vf-plan-modal"><strong>📅 Añadir “{platoParaPlan.name}” al plan</strong><div className="vf-plan-modal-grid"><label className="vf-muted">Día<input className="vf-text" type="date" value={fechaPlanNutricion} onChange={e=>setFechaPlanNutricion(e.target.value)}/></label><label className="vf-muted">Momento<select className="vf-text" value={tipoPlanNutricion} onChange={e=>setTipoPlanNutricion(e.target.value as NutritionCategory)}><option value="desayuno">Desayuno</option><option value="comida">Comida</option><option value="snack">Merienda</option><option value="cena">Cena</option></select></label><div className="vf-meal-actions"><button className="vf-primary" onClick={añadirPlatoAlPlan}>AÑADIR</button><button className="vf-secondary" onClick={()=>setPlatoParaPlan(null)}>CANCELAR</button></div></div></div>}
+
+            {cargandoNutricion && <div className="vf-section-card">Cargando Nutrición...</div>}
+            {!cargandoNutricion && <div className="vf-nutrition-grid">{platosFiltradosNutricion.map(m=><article className={`vf-meal-card ${!m.published?"vf-unpublished":""}`} key={m.id}>{m.image_url?<img className="vf-meal-image" src={m.image_url} alt={m.name}/>:<div className="vf-meal-placeholder">🍽️</div>}<div className="vf-meal-body"><div style={{display:"flex",justifyContent:"space-between",gap:8}}><div><h3>{m.name}</h3>{m.description&&<div className="vf-muted">{m.description}</div>}</div>{!m.published&&<span className="vf-publish-chip">BORRADOR</span>}</div><div className="vf-meal-macros"><div><strong>{m.calories}</strong><small>KCAL</small></div><div><strong>{m.protein}g</strong><small>PROTEÍNA</small></div><div><strong>{m.carbs}g</strong><small>CARBOS</small></div><div><strong>{m.fats}g</strong><small>GRASAS</small></div></div><div className="vf-meal-actions"><button className="vf-primary" onClick={()=>prepararAñadirPlan(m)}>＋ AÑADIR AL PLAN</button><button className="vf-secondary" onClick={()=>setPlatoAbiertoId(platoAbiertoId===m.id?null:m.id)}>{platoAbiertoId===m.id?"OCULTAR":"VER RECETA"}</button>{esAdminNutricion&&<><button className="vf-secondary" onClick={()=>editarPlatoNutricion(m)}>✏️</button><button className="vf-danger" onClick={()=>borrarPlatoNutricion(m)}>🗑️</button></>}</div>{platoAbiertoId===m.id&&<div className="vf-meal-detail"><h4>Ingredientes</h4>{m.ingredients?.length?<ul>{m.ingredients.map((i,idx)=><li key={idx}>{i.cantidad&&<strong>{i.cantidad} · </strong>}{i.nombre}</li>)}</ul>:<div className="vf-muted">Sin ingredientes añadidos.</div>}<h4>Preparación</h4><div className="vf-meal-prep">{m.preparation||"Sin preparación añadida."}</div></div>}</div></article>)}</div>}
+            {!cargandoNutricion && !platosFiltradosNutricion.length && <div className="vf-section-card">Todavía no hay platos publicados en esta categoría.</div>}
+          </>}
+
+          {seccionNutricion === "plan" && <>
+            <button className="vf-secondary vf-back-nutrition" onClick={()=>setSeccionNutricion("inicio")}>← VOLVER A NUTRICIÓN</button>
+            <div className="vf-nutrition-hero"><div><div className="vf-eyebrow">NUTRICIÓN</div><h1>📅 Plan semanal</h1><p>Tu planificación personal. Solo tú puedes verla y modificarla.</p></div></div>
+            <div className="vf-week-plan-head"><button className="vf-secondary" onClick={()=>moverSemanaNutricion(-1)}>‹ SEMANA ANTERIOR</button><div>{semanaNutricion.toLocaleDateString("es-ES",{day:"2-digit",month:"long"})} — {diasSemanaNutricion[6].toLocaleDateString("es-ES",{day:"2-digit",month:"long",year:"numeric"})}</div><button className="vf-secondary" onClick={()=>moverSemanaNutricion(1)}>SEMANA SIGUIENTE ›</button></div>
+            <div className="vf-meal-week">{diasSemanaNutricion.map((d)=>{const k=`${d.getFullYear()}-${String(d.getMonth()+1).padStart(2,"0")}-${String(d.getDate()).padStart(2,"0")}`;return <section className="vf-meal-day" key={k}><h4>{d.toLocaleDateString("es-ES",{weekday:"long"})}<span>{d.toLocaleDateString("es-ES",{day:"2-digit",month:"2-digit"})}</span></h4>{(["desayuno","comida","snack","cena"] as NutritionCategory[]).map(tipo=>{const items=planNutricion.filter(e=>e.plan_date===k&&e.meal_type===tipo);return <div className="vf-meal-slot" key={tipo}><small>{NUTRITION_LABELS[tipo].toUpperCase()}</small>{items.map(item=><div className="vf-plan-item" key={item.id}><span>{item.nutrition_meals?.name??"Plato"}</span><button onClick={()=>quitarDelPlan(item.id)}>✕</button></div>)}{!items.length&&<div className="vf-muted" style={{fontSize:8,marginTop:4}}>—</div>}</div>})}</section>})}</div>
+          </>}
+        </>}
+
         {vista==="calendario"&&<>
           <h1 className="vf-page-title">📅 CALENDARIO GYM</h1>
           <div className="vf-calendar-top">
@@ -1637,6 +1889,7 @@ useEffect(() => {
         <button className={`vf-nav ${vista==="progreso"?"active":""}`} onClick={()=>setVista("progreso")}><span>📈</span>PROGRESO</button>
         <button className={`vf-nav ${vista==="rutinas"?"active":""}`} onClick={()=>setVista("rutinas")}><span>📋</span>RUTINAS</button>
         <button className={`vf-nav ${vista==="biblioteca"?"active":""}`} onClick={()=>{setTargetBiblioteca(null);setVista("biblioteca")}}><span>📚</span>BIBLIOTECA</button>
+        <button className={`vf-nav ${vista==="nutricion"?"active":""}`} onClick={()=>abrirNutricion("inicio")}><span>🍽️</span>NUTRICIÓN</button>
         <button className={`vf-nav ${vista==="calendario"?"active":""}`} onClick={()=>setVista("calendario")}><span>📅</span>CALENDARIO</button>
         <button className={`vf-nav ${vista==="ajustes"?"active":""}`} onClick={()=>setVista("ajustes")}><span>⚙️</span>AJUSTES</button>
       </nav>
