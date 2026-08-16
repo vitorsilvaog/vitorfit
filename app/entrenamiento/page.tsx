@@ -91,6 +91,10 @@ type NutritionMeal = {
   preparation: string | null;
   published: boolean;
   created_by: string;
+  moderation_status?: "pending" | "published" | "rejected";
+  author_name?: string | null;
+  reviewed_at?: string | null;
+  reviewed_by?: string | null;
   created_at?: string;
   updated_at?: string;
 };
@@ -660,7 +664,7 @@ async function cerrarSesion() {
   window.location.href = "/login";
 }
   const [vista, setVista] = useState<"inicio" | "entreno" | "historial" | "progreso" | "rutinas" | "biblioteca" | "nutricion" | "calendario" | "ajustes">("inicio");
-  const [seccionNutricion, setSeccionNutricion] = useState<"inicio" | NutritionCategory | "plan">("inicio");
+  const [seccionNutricion, setSeccionNutricion] = useState<"inicio" | NutritionCategory | "plan" | "proponer" | "pendientes">("inicio");
   const [platosNutricion, setPlatosNutricion] = useState<NutritionMeal[]>([]);
   const [planNutricion, setPlanNutricion] = useState<MealPlanEntry[]>([]);
   const [cargandoNutricion, setCargandoNutricion] = useState(false);
@@ -683,6 +687,8 @@ async function cerrarSesion() {
     name: "", category: "desayuno" as NutritionCategory, description: "", image_url: "",
     calories: "", protein: "", carbs: "", fats: "", ingredients: "", preparation: "", published: true,
   });
+  const [nombreAutorPropuesta, setNombreAutorPropuesta] = useState("");
+  const [guardandoPropuesta, setGuardandoPropuesta] = useState(false);
   const [rutinas, setRutinas] = useState<Routine[]>(clone(DEFAULT_ROUTINES));
   const [rutinaActualId, setRutinaActualId] = useState(DEFAULT_ROUTINES[0].id);
   const [diaActualIndex, setDiaActualIndex] = useState(0);
@@ -1285,7 +1291,7 @@ useEffect(() => {
     cargarNutricion();
   }, [userId]);
 
-  const abrirNutricion = (seccion: "inicio" | NutritionCategory | "plan" = "inicio") => {
+  const abrirNutricion = (seccion: "inicio" | NutritionCategory | "plan" | "proponer" | "pendientes" = "inicio") => {
     setSeccionNutricion(seccion);
     setVista("nutricion");
     if (userId) cargarNutricion();
@@ -1340,6 +1346,8 @@ useEffect(() => {
       ingredients: ingredientesDesdeTexto(formPlato.ingredients),
       preparation: formPlato.preparation.trim() || null,
       published: formPlato.published,
+      moderation_status: formPlato.published ? "published" : "pending",
+      author_name: "VitorFit",
       created_by: userId,
       updated_at: new Date().toISOString(),
     };
@@ -1378,6 +1386,69 @@ useEffect(() => {
     await cargarNutricion();
   };
 
+  const enviarPropuestaPlato = async () => {
+    if (!userId) return;
+    if (!formPlato.name.trim()) { setMensaje("⚠️ Pon un nombre al plato."); return; }
+    if (!nombreAutorPropuesta.trim()) { setMensaje("⚠️ Escribe el nombre que quieres mostrar como autor."); return; }
+    setGuardandoPropuesta(true);
+    let imageUrl = formPlato.image_url || null;
+
+    if (archivoNutricion) {
+      const ext = archivoNutricion.name.split(".").pop() || "jpg";
+      const ruta = `proposals/${userId}/${Date.now()}-${slug(formPlato.name)}.${ext}`;
+      const { error: uploadError } = await supabase.storage.from("nutrition-images").upload(ruta, archivoNutricion, { upsert: false });
+      if (uploadError) {
+        setMensaje(`❌ No pude subir la foto: ${uploadError.message}`);
+        setGuardandoPropuesta(false);
+        return;
+      }
+      const { data: publicData } = supabase.storage.from("nutrition-images").getPublicUrl(ruta);
+      imageUrl = publicData.publicUrl;
+    }
+
+    const payload = {
+      name: formPlato.name.trim(),
+      category: formPlato.category,
+      description: formPlato.description.trim() || null,
+      image_url: imageUrl,
+      calories: Number(formPlato.calories || 0),
+      protein: Number(formPlato.protein || 0),
+      carbs: Number(formPlato.carbs || 0),
+      fats: Number(formPlato.fats || 0),
+      ingredients: ingredientesDesdeTexto(formPlato.ingredients),
+      preparation: formPlato.preparation.trim() || null,
+      published: false,
+      moderation_status: "pending",
+      author_name: nombreAutorPropuesta.trim(),
+      created_by: userId,
+      updated_at: new Date().toISOString(),
+    };
+
+    const { error } = await supabase.from("nutrition_meals").insert(payload);
+    setGuardandoPropuesta(false);
+    if (error) { setMensaje(`❌ ${error.message}`); return; }
+
+    setMensaje("✅ Propuesta enviada. Queda pendiente de aprobación.");
+    resetFormPlato();
+    setNombreAutorPropuesta("");
+    setSeccionNutricion("inicio");
+    await cargarNutricion();
+  };
+
+  const revisarPropuesta = async (m: NutritionMeal, estado: "published" | "rejected") => {
+    if (!esAdminNutricion || !userId) return;
+    const { error } = await supabase.from("nutrition_meals").update({
+      moderation_status: estado,
+      published: estado === "published",
+      reviewed_at: new Date().toISOString(),
+      reviewed_by: userId,
+      updated_at: new Date().toISOString(),
+    }).eq("id", m.id);
+    if (error) { setMensaje(`❌ ${error.message}`); return; }
+    setMensaje(estado === "published" ? "✅ Plato aprobado y publicado para todos." : "❌ Propuesta rechazada.");
+    await cargarNutricion();
+  };
+
   const prepararAñadirPlan = (m: NutritionMeal) => {
     setPlatoParaPlan(m);
     setTipoPlanNutricion(m.category);
@@ -1410,10 +1481,21 @@ useEffect(() => {
   }), [semanaNutricion]);
 
   const platosFiltradosNutricion = useMemo(() => {
-    if (seccionNutricion === "inicio" || seccionNutricion === "plan") return [];
+    if (!["desayuno","comida","snack","cena"].includes(seccionNutricion)) return [];
     const q = busquedaNutricion.trim().toLowerCase();
-    return platosNutricion.filter((m) => m.category === seccionNutricion && (esAdminNutricion || m.published) && (!q || `${m.name} ${m.description ?? ""}`.toLowerCase().includes(q)));
+    return platosNutricion.filter((m) =>
+      m.category === seccionNutricion &&
+      m.moderation_status !== "pending" &&
+      m.moderation_status !== "rejected" &&
+      (esAdminNutricion || m.published) &&
+      (!q || `${m.name} ${m.description ?? ""}`.toLowerCase().includes(q))
+    );
   }, [platosNutricion, seccionNutricion, busquedaNutricion, esAdminNutricion]);
+
+  const propuestasPendientes = useMemo(
+    () => platosNutricion.filter((m) => m.moderation_status === "pending"),
+    [platosNutricion]
+  );
 
   const normalizarZona = (valor: string) =>
     (valor || "")
@@ -1775,7 +1857,11 @@ useEffect(() => {
           {seccionNutricion === "inicio" && <>
             <section className="vf-nutrition-hero">
               <div><div className="vf-eyebrow">VITORFIT NUTRICIÓN</div><h1>Nutrición</h1><p>Elige un plato y añádelo a tu plan semanal.</p></div>
-              {esAdminNutricion && <button className="vf-primary" onClick={()=>{resetFormPlato();setMostrarEditorPlato(true)}}>＋ CREAR PLATO</button>}
+              <div style={{display:"flex",gap:8,flexWrap:"wrap"}}>
+                <button className="vf-primary" onClick={()=>{resetFormPlato();setNombreAutorPropuesta("");setSeccionNutricion("proponer")}}>＋ PROPONER PLATO</button>
+                {esAdminNutricion && <button className="vf-secondary" onClick={()=>setSeccionNutricion("pendientes")}>🔔 PENDIENTES ({propuestasPendientes.length})</button>}
+                {esAdminNutricion && <button className="vf-primary" onClick={()=>{resetFormPlato();setMostrarEditorPlato(true)}}>＋ CREAR PLATO</button>}
+              </div>
             </section>
             <div className="vf-nutrition-categories">
               <button className="vf-nutrition-cat" onClick={()=>setSeccionNutricion("desayuno")}><span>🍳</span><h3>Desayunos</h3><p>Ideas para empezar el día.</p></button>
@@ -1786,9 +1872,9 @@ useEffect(() => {
             <div className="vf-nutrition-plan-card"><div><div className="vf-card-kicker">TU ORGANIZACIÓN</div><h3>📅 Plan semanal</h3><p className="vf-muted">Organiza desayuno, comida, merienda y cena de lunes a domingo.</p></div><button className="vf-primary" onClick={()=>setSeccionNutricion("plan")}>ABRIR PLAN SEMANAL</button></div>
           </>}
 
-          {seccionNutricion !== "inicio" && seccionNutricion !== "plan" && <>
+          {["desayuno","comida","snack","cena"].includes(seccionNutricion) && <>
             <button className="vf-secondary vf-back-nutrition" onClick={()=>setSeccionNutricion("inicio")}>← VOLVER A NUTRICIÓN</button>
-            <div className="vf-nutrition-hero"><div><div className="vf-eyebrow">NUTRICIÓN</div><h1>{seccionNutricion === "snack" ? "🍓 Meriendas" : seccionNutricion === "desayuno" ? "🍳 Desayunos" : seccionNutricion === "comida" ? "🍛 Comidas" : "🌙 Cenas"}</h1><p>{platosFiltradosNutricion.length} platos disponibles</p></div>{esAdminNutricion&&<button className="vf-primary" onClick={()=>{resetFormPlato();setFormPlato(f=>({...f,category:seccionNutricion}));setMostrarEditorPlato(true)}}>＋ NUEVO PLATO</button>}</div>
+            <div className="vf-nutrition-hero"><div><div className="vf-eyebrow">NUTRICIÓN</div><h1>{seccionNutricion === "snack" ? "🍓 Meriendas" : seccionNutricion === "desayuno" ? "🍳 Desayunos" : seccionNutricion === "comida" ? "🍛 Comidas" : "🌙 Cenas"}</h1><p>{platosFiltradosNutricion.length} platos disponibles</p></div>{esAdminNutricion&&<button className="vf-primary" onClick={()=>{resetFormPlato();setFormPlato(f=>({...f,category:seccionNutricion as NutritionCategory}));setMostrarEditorPlato(true)}}>＋ NUEVO PLATO</button>}</div>
             <div className="vf-nutrition-toolbar"><input className="vf-text" placeholder="🔎 Buscar plato..." value={busquedaNutricion} onChange={e=>setBusquedaNutricion(e.target.value)}/><button className="vf-secondary" onClick={cargarNutricion}>↻ ACTUALIZAR</button></div>
 
             {mostrarEditorPlato && esAdminNutricion && <section className="vf-section-card"><div className="vf-toolbar" style={{justifyContent:"space-between"}}><div><span className="vf-admin-badge">ADMINISTRADOR</span><h2 style={{margin:"8px 0 0"}}>{editandoPlatoId?"Editar plato":"Crear plato"}</h2></div><button className="vf-secondary" onClick={()=>{setMostrarEditorPlato(false);resetFormPlato()}}>✕ CERRAR</button></div><div className="vf-nutrition-form"><div className="vf-nutrition-form-grid"><input className="vf-text" placeholder="Nombre del plato" value={formPlato.name} onChange={e=>setFormPlato(f=>({...f,name:e.target.value}))}/><select className="vf-text" value={formPlato.category} onChange={e=>setFormPlato(f=>({...f,category:e.target.value as NutritionCategory}))}><option value="desayuno">Desayuno</option><option value="comida">Comida</option><option value="snack">Merienda</option><option value="cena">Cena</option></select><input className="vf-text" type="number" placeholder="kcal" value={formPlato.calories} onChange={e=>setFormPlato(f=>({...f,calories:e.target.value}))}/><input className="vf-text" type="number" placeholder="Proteína g" value={formPlato.protein} onChange={e=>setFormPlato(f=>({...f,protein:e.target.value}))}/><input className="vf-text" type="number" placeholder="Carbos g" value={formPlato.carbs} onChange={e=>setFormPlato(f=>({...f,carbs:e.target.value}))}/></div><div className="vf-nutrition-form-grid" style={{gridTemplateColumns:"1fr 2fr 1fr"}}><input className="vf-text" type="number" placeholder="Grasas g" value={formPlato.fats} onChange={e=>setFormPlato(f=>({...f,fats:e.target.value}))}/><input className="vf-text" placeholder="Descripción" value={formPlato.description} onChange={e=>setFormPlato(f=>({...f,description:e.target.value}))}/><label className="vf-text" style={{display:"flex",alignItems:"center",gap:8}}><input type="checkbox" checked={formPlato.published} onChange={e=>setFormPlato(f=>({...f,published:e.target.checked}))}/> Publicado</label></div><label className="vf-muted">Foto del plato<input className="vf-text" style={{display:"block",width:"100%",marginTop:6}} type="file" accept="image/*" onChange={e=>setArchivoNutricion(e.target.files?.[0]??null)}/></label><textarea className="vf-text" placeholder={'Ingredientes: una línea por ingrediente. Ejemplo:\n60 g | Avena\n200 ml | Leche'} value={formPlato.ingredients} onChange={e=>setFormPlato(f=>({...f,ingredients:e.target.value}))}/><textarea className="vf-text" placeholder="Preparación paso a paso..." value={formPlato.preparation} onChange={e=>setFormPlato(f=>({...f,preparation:e.target.value}))}/><button className="vf-primary" disabled={cargandoNutricion} onClick={guardarPlatoNutricion}>{cargandoNutricion?"GUARDANDO...":editandoPlatoId?"GUARDAR CAMBIOS":"PUBLICAR PLATO"}</button></div></section>}
@@ -1798,6 +1884,51 @@ useEffect(() => {
             {cargandoNutricion && <div className="vf-section-card">Cargando Nutrición...</div>}
             {!cargandoNutricion && <div className="vf-nutrition-grid">{platosFiltradosNutricion.map(m=><article className={`vf-meal-card ${!m.published?"vf-unpublished":""}`} key={m.id}>{m.image_url?<img className="vf-meal-image" src={m.image_url} alt={m.name}/>:<div className="vf-meal-placeholder">🍽️</div>}<div className="vf-meal-body"><div style={{display:"flex",justifyContent:"space-between",gap:8}}><div><h3>{m.name}</h3>{m.description&&<div className="vf-muted">{m.description}</div>}</div>{!m.published&&<span className="vf-publish-chip">BORRADOR</span>}</div><div className="vf-meal-macros"><div><strong>{m.calories}</strong><small>KCAL</small></div><div><strong>{m.protein}g</strong><small>PROTEÍNA</small></div><div><strong>{m.carbs}g</strong><small>CARBOS</small></div><div><strong>{m.fats}g</strong><small>GRASAS</small></div></div><div className="vf-meal-actions"><button className="vf-primary" onClick={()=>prepararAñadirPlan(m)}>＋ AÑADIR AL PLAN</button><button className="vf-secondary" onClick={()=>setPlatoAbiertoId(platoAbiertoId===m.id?null:m.id)}>{platoAbiertoId===m.id?"OCULTAR":"VER RECETA"}</button>{esAdminNutricion&&<><button className="vf-secondary" onClick={()=>editarPlatoNutricion(m)}>✏️</button><button className="vf-danger" onClick={()=>borrarPlatoNutricion(m)}>🗑️</button></>}</div>{platoAbiertoId===m.id&&<div className="vf-meal-detail"><h4>Ingredientes</h4>{m.ingredients?.length?<ul>{m.ingredients.map((i,idx)=><li key={idx}>{i.cantidad&&<strong>{i.cantidad} · </strong>}{i.nombre}</li>)}</ul>:<div className="vf-muted">Sin ingredientes añadidos.</div>}<h4>Preparación</h4><div className="vf-meal-prep">{m.preparation||"Sin preparación añadida."}</div></div>}</div></article>)}</div>}
             {!cargandoNutricion && !platosFiltradosNutricion.length && <div className="vf-section-card">Todavía no hay platos publicados en esta categoría.</div>}
+          </>}
+
+          {seccionNutricion === "proponer" && <>
+            <button className="vf-secondary vf-back-nutrition" onClick={()=>setSeccionNutricion("inicio")}>← VOLVER A NUTRICIÓN</button>
+            <div className="vf-nutrition-hero"><div><div className="vf-eyebrow">COMUNIDAD VITORFIT</div><h1>＋ Proponer plato</h1><p>Tu propuesta no se publica automáticamente. Primero la revisará el administrador.</p></div></div>
+            <section className="vf-section-card">
+              <div className="vf-nutrition-form">
+                <div className="vf-nutrition-form-grid">
+                  <input className="vf-text" placeholder="Tu nombre visible (ej. Vitor123)" value={nombreAutorPropuesta} onChange={e=>setNombreAutorPropuesta(e.target.value)}/>
+                  <input className="vf-text" placeholder="Nombre del plato" value={formPlato.name} onChange={e=>setFormPlato(f=>({...f,name:e.target.value}))}/>
+                  <select className="vf-text" value={formPlato.category} onChange={e=>setFormPlato(f=>({...f,category:e.target.value as NutritionCategory}))}><option value="desayuno">Desayuno</option><option value="comida">Comida</option><option value="snack">Merienda</option><option value="cena">Cena</option></select>
+                  <input className="vf-text" type="number" placeholder="kcal" value={formPlato.calories} onChange={e=>setFormPlato(f=>({...f,calories:e.target.value}))}/>
+                  <input className="vf-text" type="number" placeholder="Proteína g" value={formPlato.protein} onChange={e=>setFormPlato(f=>({...f,protein:e.target.value}))}/>
+                  <input className="vf-text" type="number" placeholder="Carbos g" value={formPlato.carbs} onChange={e=>setFormPlato(f=>({...f,carbs:e.target.value}))}/>
+                  <input className="vf-text" type="number" placeholder="Grasas g" value={formPlato.fats} onChange={e=>setFormPlato(f=>({...f,fats:e.target.value}))}/>
+                </div>
+                <input className="vf-text" placeholder="Descripción" value={formPlato.description} onChange={e=>setFormPlato(f=>({...f,description:e.target.value}))}/>
+                <label className="vf-muted">Foto del plato<input className="vf-text" style={{display:"block",width:"100%",marginTop:6}} type="file" accept="image/*" onChange={e=>setArchivoNutricion(e.target.files?.[0]??null)}/></label>
+                <textarea className="vf-text" placeholder={'Ingredientes: una línea por ingrediente. Ejemplo:\n60 g | Avena\n200 ml | Leche'} value={formPlato.ingredients} onChange={e=>setFormPlato(f=>({...f,ingredients:e.target.value}))}/>
+                <textarea className="vf-text" placeholder="Preparación paso a paso..." value={formPlato.preparation} onChange={e=>setFormPlato(f=>({...f,preparation:e.target.value}))}/>
+                <button className="vf-primary" disabled={guardandoPropuesta} onClick={enviarPropuestaPlato}>{guardandoPropuesta?"ENVIANDO...":"📨 ENVIAR PARA REVISIÓN"}</button>
+              </div>
+            </section>
+          </>}
+
+          {seccionNutricion === "pendientes" && esAdminNutricion && <>
+            <button className="vf-secondary vf-back-nutrition" onClick={()=>setSeccionNutricion("inicio")}>← VOLVER A NUTRICIÓN</button>
+            <div className="vf-nutrition-hero"><div><div className="vf-eyebrow">ADMINISTRADOR</div><h1>🔔 Solicitudes pendientes ({propuestasPendientes.length})</h1><p>Revisa cada plato antes de publicarlo para todos.</p></div></div>
+            {!propuestasPendientes.length && <div className="vf-section-card">No hay propuestas pendientes.</div>}
+            <div className="vf-nutrition-grid">{propuestasPendientes.map(m=><article className="vf-meal-card" key={m.id}>
+              {m.image_url?<img className="vf-meal-image" src={m.image_url} alt={m.name}/>:<div className="vf-meal-placeholder">🍽️</div>}
+              <div className="vf-meal-body">
+                <span className="vf-publish-chip">PENDIENTE</span>
+                <h3>{m.name}</h3>
+                <div className="vf-muted">👤 Propuesto por {m.author_name || "Usuario"} · {NUTRITION_LABELS[m.category]}</div>
+                {m.description&&<p>{m.description}</p>}
+                <div className="vf-meal-macros"><div><strong>{m.calories}</strong><small>KCAL</small></div><div><strong>{m.protein}g</strong><small>PROTEÍNA</small></div><div><strong>{m.carbs}g</strong><small>CARBOS</small></div><div><strong>{m.fats}g</strong><small>GRASAS</small></div></div>
+                <div className="vf-meal-detail"><h4>Ingredientes</h4>{m.ingredients?.length?<ul>{m.ingredients.map((i,idx)=><li key={idx}>{i.cantidad&&<strong>{i.cantidad} · </strong>}{i.nombre}</li>)}</ul>:<div className="vf-muted">Sin ingredientes.</div>}<h4>Preparación</h4><div className="vf-meal-prep">{m.preparation||"Sin preparación."}</div></div>
+                <div className="vf-meal-actions">
+                  <button className="vf-primary" onClick={()=>revisarPropuesta(m,"published")}>✅ APROBAR</button>
+                  <button className="vf-danger" onClick={()=>revisarPropuesta(m,"rejected")}>❌ RECHAZAR</button>
+                  <button className="vf-secondary" onClick={()=>editarPlatoNutricion(m)}>✏️ EDITAR</button>
+                </div>
+              </div>
+            </article>)}</div>
           </>}
 
           {seccionNutricion === "plan" && <>
