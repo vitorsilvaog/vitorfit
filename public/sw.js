@@ -1,5 +1,4 @@
-const CACHE_NAME = "vitorfit-v2";
-
+const CACHE_NAME = "vitorfit-v3";
 self.addEventListener("install", () => {
   self.skipWaiting();
 });
