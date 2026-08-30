@@ -671,6 +671,7 @@ const keyCreatina = "vitorfit-creatina-v1";
 const keyAnatomiaOverrides = "vitorfit-anatomia-overrides-v1";
 const keyUsuarioActual = "vitorfit-usuario-actual";
 const keyDescansoFin = "vitorfit-descanso-fin-v1";
+const keySeriesConfirmadas = "vitorfit-series-confirmadas-v1";
 
 const uid = (prefix: string) => `${prefix}-${Date.now()}-${Math.random().toString(36).slice(2, 8)}`;
 const clone = <T,>(value: T): T => JSON.parse(JSON.stringify(value));
@@ -769,6 +770,7 @@ const ultimoRegistroHistorial =
   const [descansoSerieActiva, setDescansoSerieActiva] = useState<{ ejId: string; serieIndex: number } | null>(null);
   const [seriesSesion, setSeriesSesion] = useState<Record<string, number>>({});
   const [seriesConfirmadas, setSeriesConfirmadas] = useState<Record<string, number>>({});
+  const [serieEditando, setSerieEditando] = useState<{ ejId: string; serieIndex: number } | null>(null);
   const [ajustes, setAjustes] = useState<Ajustes>({ descanso: 90, mostrarComparacion: true, mostrarRir: true });
   const [mensaje, setMensaje] = useState("");
   const [calendario, setCalendario] = useState<CalendarMap>({});
@@ -948,6 +950,7 @@ const ultimoRegistroHistorial =
     const cal = localStorage.getItem(keyUsuario(keyCalendario));
     const cr = localStorage.getItem(keyUsuario(keyCreatina));
     const ao = localStorage.getItem(keyUsuario(keyAnatomiaOverrides));
+    const sc = localStorage.getItem(keyUsuario(keySeriesConfirmadas));
 
     if (r) setRegistros(JSON.parse(r));
     if (h) setHistorial(JSON.parse(h));
@@ -971,6 +974,7 @@ const ultimoRegistroHistorial =
     if (cal) setCalendario(JSON.parse(cal));
     if (cr) setCreatina(JSON.parse(cr));
     if (ao) setAnatomiaOverrides(JSON.parse(ao));
+    if (sc) setSeriesConfirmadas(JSON.parse(sc));
 
   } catch {
     setMensaje(
@@ -1024,6 +1028,11 @@ useEffect(() => {
   if (!userId) return;
   localStorage.setItem(keyUsuario(keyCreatina), JSON.stringify(creatina));
 }, [userId, creatina]);
+
+useEffect(() => {
+  if (!userId) return;
+  localStorage.setItem(keyUsuario(keySeriesConfirmadas), JSON.stringify(seriesConfirmadas));
+}, [userId, seriesConfirmadas]);
 
 useEffect(() => {
   if (!userId) return;
@@ -1115,15 +1124,51 @@ useEffect(() => {
       return;
     }
     const hechas = serieIndex + 1;
-    setSeriesConfirmadas((prev) => ({ ...prev, [ej.id]: hechas }));
+    const nuevasConfirmadas = { ...seriesConfirmadas, [ej.id]: hechas };
+    setSeriesConfirmadas(nuevasConfirmadas);
+
+    // Autoguardado inmediato del progreso de la serie.
+    if (userId && typeof window !== "undefined") {
+      localStorage.setItem(keyUsuario(keyRegistros), JSON.stringify(registros));
+      localStorage.setItem(keyUsuario(keySeriesConfirmadas), JSON.stringify(nuevasConfirmadas));
+    }
+
     if (hechas < cantidad) {
       setDescansoSerieActiva({ ejId: ej.id, serieIndex });
       iniciarDescanso(ej.descanso ?? ajustes.descanso);
       setMensaje(`✅ Serie ${hechas} completada · descanso iniciado`);
     } else {
       setDescansoSerieActiva(null);
+      setDescansoFin(null);
+      setDescansoRestante(0);
+      if (userId && typeof window !== "undefined") {
+        localStorage.removeItem(keyUsuario(keyDescansoFin));
+      }
       setMensaje(`✅ ${nombreVariante(ej)} · todas las series completadas`);
     }
+  };
+
+  const editarSerieConfirmada = (ej: RoutineExercise, serieIndex: number) => {
+    setSerieEditando({ ejId: ej.id, serieIndex });
+    setMensaje(`✏️ Editando serie ${serieIndex + 1} de ${nombreVariante(ej)}`);
+  };
+
+  const guardarEdicionSerie = (ej: RoutineExercise, serieIndex: number) => {
+    const serie = registros[ej.id]?.[serieIndex];
+    if (!serie?.kg || !serie?.reps) {
+      setMensaje("⚠️ Completa KG y REPS antes de guardar el cambio.");
+      return;
+    }
+
+    // La serie ya estaba confirmada: solo corregimos sus datos.
+    // No reiniciamos descanso ni alteramos las series posteriores.
+    if (userId && typeof window !== "undefined") {
+      localStorage.setItem(keyUsuario(keyRegistros), JSON.stringify(registros));
+      localStorage.setItem(keyUsuario(keySeriesConfirmadas), JSON.stringify(seriesConfirmadas));
+    }
+
+    setSerieEditando(null);
+    setMensaje(`✅ Serie ${serieIndex + 1} corregida y guardada`);
   };
 
   const compararSerie = (ej: RoutineExercise, i: number) => {
@@ -1181,7 +1226,13 @@ useEffect(() => {
     localStorage.setItem(keyUsuario(keyHistorial), JSON.stringify(nuevoHistorial));
     setRegistros((prev) => ({ ...prev, [ej.id]: seriesVacias(ej.series) }));
     setSeriesSesion((prev) => { const next = { ...prev }; delete next[ej.id]; return next; });
-    setSeriesConfirmadas((prev) => ({ ...prev, [ej.id]: 0 }));
+    setSeriesConfirmadas((prev) => {
+      const copia = { ...prev, [ej.id]: 0 };
+      if (userId && typeof window !== "undefined") {
+        localStorage.setItem(keyUsuario(keySeriesConfirmadas), JSON.stringify(copia));
+      }
+      return copia;
+    });
     if (descansoSerieActiva?.ejId === ej.id) setDescansoSerieActiva(null);
     setMensaje(indiceHoy >= 0
       ? `✅ ${nombreVariante(ej)} actualizado en la sesión de hoy`
@@ -2391,7 +2442,7 @@ linear-gradient(180deg,rgba(18,12,15,.97),rgba(11,12,15,.98));backdrop-filter:bl
               </div>
               <div className="vf-compare-grid">
                 <div className="vf-panel last"><div className="vf-panel-head"><span>📈 ÚLTIMA SESIÓN</span>{anterior&&<span className="vf-date">{anterior.fecha.split(",")[0]}</span>}</div>{Array.from({length:Math.max(cantidadSeries,anterior?.series?.length??0)},(_,i)=>{const s=anterior?.series?.[i];return <div className="vf-series-row" key={i}><div className="vf-slabel">S{i+1}</div><div className="vf-box"><strong>{s?.kg||"—"}</strong><small>KG</small></div><div className="vf-box"><strong>{s?.reps||"—"}</strong><small>REPS</small></div><div className="vf-box"><strong>{s?.rir||"—"}</strong><small>RIR</small></div><div className="vf-box"><strong>—</strong><small>DESCANSO</small></div></div>})}{anterior&&anterior.variante!==varianteActual&&<div className="vf-muted">Último registro: {anterior.variante}</div>}</div>
-                <div className="vf-panel today"><div className="vf-panel-head"><span>✏️ HOY</span><span className="vf-muted">{varianteActual}</span></div>{Array.from({length:cantidadSeries},(_,i)=>{const s=actuales[i]??{kg:"",reps:"",rir:""},comp=compararSerie(ej,i),hecha=i<confirmadas,activa=i===confirmadas,bloqueada=i>confirmadas;return <div className={`vf-series-row ${bloqueada?"locked":""}`} key={i}><div className="vf-slabel">S{i+1}</div><input className="vf-input" disabled={!activa} type="number" placeholder="KG" value={s.kg} onChange={e=>setSerie(ej,i,"kg",e.target.value)}/><input className="vf-input" disabled={!activa} type="number" placeholder="REPS" value={s.reps} onChange={e=>setSerie(ej,i,"reps",e.target.value)}/><input className="vf-input" disabled={!activa} type="number" placeholder="RIR" value={s.rir} onChange={e=>setSerie(ej,i,"rir",e.target.value)}/><button className={`vf-series-rest ${hecha?"done":""} ${descansoSerieActiva?.ejId===ej.id&&descansoSerieActiva?.serieIndex===i&&descansoRestante>0?"active":""}`} disabled={!activa} onClick={()=>completarSerie(ej,i)}>{hecha?"✅ HECHA":bloqueada?"🔒 BLOQUEADA":`✓ SERIE ${i+1}`}</button>{comp&&<div className="vf-compare">{comp}</div>}</div>})}</div>
+                <div className="vf-panel today"><div className="vf-panel-head"><span>✏️ HOY</span><span className="vf-muted">{varianteActual}</span></div>{Array.from({length:cantidadSeries},(_,i)=>{const s=actuales[i]??{kg:"",reps:"",rir:""},comp=compararSerie(ej,i),hecha=i<confirmadas,editando=serieEditando?.ejId===ej.id&&serieEditando?.serieIndex===i,activa=i===confirmadas||editando,bloqueada=i>confirmadas&&!editando;return <div className={`vf-series-row ${bloqueada?"locked":""}`} key={i}><div className="vf-slabel">S{i+1}</div><input className="vf-input" disabled={!activa} type="number" placeholder="KG" value={s.kg} onChange={e=>setSerie(ej,i,"kg",e.target.value)}/><input className="vf-input" disabled={!activa} type="number" placeholder="REPS" value={s.reps} onChange={e=>setSerie(ej,i,"reps",e.target.value)}/><input className="vf-input" disabled={!activa} type="number" placeholder="RIR" value={s.rir} onChange={e=>setSerie(ej,i,"rir",e.target.value)}/>{hecha?(editando?<button className="vf-series-rest active" onClick={()=>guardarEdicionSerie(ej,i)}>✓ GUARDAR CAMBIO</button>:<button className="vf-series-rest done" onClick={()=>editarSerieConfirmada(ej,i)}>✏️ EDITAR</button>):<button className={`vf-series-rest ${descansoSerieActiva?.ejId===ej.id&&descansoSerieActiva?.serieIndex===i&&descansoRestante>0?"active":""}`} disabled={!activa} onClick={()=>completarSerie(ej,i)}>{bloqueada?"🔒 BLOQUEADA":`✓ SERIE ${i+1}`}</button>}{comp&&<div className="vf-compare">{comp}</div>}</div>})}</div>
               </div>
               <div className="vf-card-actions"><button className="vf-save" disabled={confirmadas<cantidadSeries} onClick={()=>guardarEjercicio(ej)}>💾 GUARDAR EJERCICIO</button><div className="vf-rest vf-rest-status">{descansoSerieActiva?.ejId===ej.id&&descansoRestante>0?`⏱️ DESCANSO ${descansoRestante}s`:confirmadas>=cantidadSeries?"✅ LISTO PARA GUARDAR":"DESCANSO AUTOMÁTICO"}</div></div>
             </section>
