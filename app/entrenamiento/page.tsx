@@ -670,6 +670,7 @@ const keyCalendario = "vitorfit-calendario-v1";
 const keyCreatina = "vitorfit-creatina-v1";
 const keyAnatomiaOverrides = "vitorfit-anatomia-overrides-v1";
 const keyUsuarioActual = "vitorfit-usuario-actual";
+const keyDescansoFin = "vitorfit-descanso-fin-v1";
 
 const uid = (prefix: string) => `${prefix}-${Date.now()}-${Math.random().toString(36).slice(2, 8)}`;
 const clone = <T,>(value: T): T => JSON.parse(JSON.stringify(value));
@@ -764,7 +765,10 @@ const ultimoRegistroHistorial =
   const [segundos, setSegundos] = useState(0);
   const [entrenoPausado, setEntrenoPausado] = useState(false);
   const [descansoRestante, setDescansoRestante] = useState(0);
+  const [descansoFin, setDescansoFin] = useState<number | null>(null);
   const [descansoSerieActiva, setDescansoSerieActiva] = useState<{ ejId: string; serieIndex: number } | null>(null);
+  const [seriesSesion, setSeriesSesion] = useState<Record<string, number>>({});
+  const [seriesConfirmadas, setSeriesConfirmadas] = useState<Record<string, number>>({});
   const [ajustes, setAjustes] = useState<Ajustes>({ descanso: 90, mostrarComparacion: true, mostrarRir: true });
   const [mensaje, setMensaje] = useState("");
   const [calendario, setCalendario] = useState<CalendarMap>({});
@@ -891,11 +895,44 @@ const ultimoRegistroHistorial =
     setVista("entreno");
   };
 
+  // Descanso basado en una hora de fin real: sigue siendo correcto aunque
+  // Android/iOS suspendan la PWA al bloquear la pantalla.
   useEffect(() => {
-    if (descansoRestante <= 0) return;
-    const t = window.setInterval(() => setDescansoRestante((s) => (s <= 1 ? 0 : s - 1)), 1000);
-    return () => window.clearInterval(t);
-  }, [descansoRestante]);
+    if (!userId || typeof window === "undefined") return;
+    const clave = keyUsuario(keyDescansoFin);
+    const guardado = Number(localStorage.getItem(clave) || 0);
+
+    if (guardado > Date.now()) {
+      setDescansoFin(guardado);
+      setDescansoRestante(Math.max(0, Math.ceil((guardado - Date.now()) / 1000)));
+    } else {
+      localStorage.removeItem(clave);
+    }
+  }, [userId]);
+
+  useEffect(() => {
+    if (!descansoFin || typeof window === "undefined") return;
+
+    const actualizarDescanso = () => {
+      const restante = Math.max(0, Math.ceil((descansoFin - Date.now()) / 1000));
+      setDescansoRestante(restante);
+      if (restante <= 0) {
+        setDescansoFin(null);
+        if (userId) localStorage.removeItem(keyUsuario(keyDescansoFin));
+      }
+    };
+
+    actualizarDescanso();
+    const t = window.setInterval(actualizarDescanso, 250);
+    window.addEventListener("focus", actualizarDescanso);
+    document.addEventListener("visibilitychange", actualizarDescanso);
+
+    return () => {
+      window.clearInterval(t);
+      window.removeEventListener("focus", actualizarDescanso);
+      document.removeEventListener("visibilitychange", actualizarDescanso);
+    };
+  }, [descansoFin, userId]);
 
   useEffect(() => {
   if (!userId) return;
@@ -1042,11 +1079,51 @@ useEffect(() => {
     return mismaVariante ?? lista[lista.length - 1] ?? null;
   };
 
+  const cantidadSeriesSesion = (ej: RoutineExercise) => seriesSesion[ej.id] ?? ej.series;
+
+  const cambiarSeriesSesion = (ej: RoutineExercise, delta: number) => {
+    const actual = cantidadSeriesSesion(ej);
+    const confirmadas = seriesConfirmadas[ej.id] ?? 0;
+    const nueva = Math.max(Math.max(1, confirmadas), Math.min(10, actual + delta));
+    if (nueva === actual) return;
+    setSeriesSesion((prev) => ({ ...prev, [ej.id]: nueva }));
+    setRegistros((prev) => {
+      const base = [...(prev[ej.id] ?? seriesVacias(actual))];
+      while (base.length < nueva) base.push({ kg: "", reps: "", rir: "" });
+      return { ...prev, [ej.id]: base.slice(0, nueva) };
+    });
+  };
+
   const setSerie = (ej: RoutineExercise, serieIndex: number, campo: keyof Serie, valor: string) => {
-    const base = registros[ej.id] ? [...registros[ej.id]] : seriesVacias(ej.series);
-    while (base.length < ej.series) base.push({ kg: "", reps: "", rir: "" });
+    const cantidad = cantidadSeriesSesion(ej);
+    const base = registros[ej.id] ? [...registros[ej.id]] : seriesVacias(cantidad);
+    while (base.length < cantidad) base.push({ kg: "", reps: "", rir: "" });
     base[serieIndex] = { ...base[serieIndex], [campo]: valor };
     setRegistros((prev) => ({ ...prev, [ej.id]: base }));
+  };
+
+  const completarSerie = (ej: RoutineExercise, serieIndex: number) => {
+    const cantidad = cantidadSeriesSesion(ej);
+    const esperada = seriesConfirmadas[ej.id] ?? 0;
+    const serie = registros[ej.id]?.[serieIndex];
+    if (serieIndex !== esperada) {
+      setMensaje(`Completa primero la serie ${esperada + 1}.`);
+      return;
+    }
+    if (!serie?.kg || !serie?.reps) {
+      setMensaje("Añade KG y REPS antes de completar la serie.");
+      return;
+    }
+    const hechas = serieIndex + 1;
+    setSeriesConfirmadas((prev) => ({ ...prev, [ej.id]: hechas }));
+    if (hechas < cantidad) {
+      setDescansoSerieActiva({ ejId: ej.id, serieIndex });
+      iniciarDescanso(ej.descanso ?? ajustes.descanso);
+      setMensaje(`✅ Serie ${hechas} completada · descanso iniciado`);
+    } else {
+      setDescansoSerieActiva(null);
+      setMensaje(`✅ ${nombreVariante(ej)} · todas las series completadas`);
+    }
   };
 
   const compararSerie = (ej: RoutineExercise, i: number) => {
@@ -1065,7 +1142,13 @@ useEffect(() => {
   };
 
   const guardarEjercicio = (ej: RoutineExercise) => {
-    const series = registros[ej.id] ?? seriesVacias(ej.series);
+    const cantidad = cantidadSeriesSesion(ej);
+    const series = (registros[ej.id] ?? seriesVacias(cantidad)).slice(0, cantidad);
+    const confirmadas = seriesConfirmadas[ej.id] ?? 0;
+    if (confirmadas < cantidad) {
+      setMensaje(`Completa las ${cantidad} series antes de guardar el ejercicio.`);
+      return;
+    }
     if (!series.some((s) => s.kg || s.reps || s.rir)) {
       setMensaje("Añade al menos una serie antes de guardar.");
       return;
@@ -1096,10 +1179,23 @@ useEffect(() => {
     const nuevoHistorial = { ...historial, [ej.id]: listaNueva };
     setHistorial(nuevoHistorial);
     localStorage.setItem(keyUsuario(keyHistorial), JSON.stringify(nuevoHistorial));
+    setRegistros((prev) => ({ ...prev, [ej.id]: seriesVacias(ej.series) }));
+    setSeriesSesion((prev) => { const next = { ...prev }; delete next[ej.id]; return next; });
+    setSeriesConfirmadas((prev) => ({ ...prev, [ej.id]: 0 }));
+    if (descansoSerieActiva?.ejId === ej.id) setDescansoSerieActiva(null);
     setMensaje(indiceHoy >= 0
       ? `✅ ${nombreVariante(ej)} actualizado en la sesión de hoy`
       : `✅ ${nombreVariante(ej)} guardado en el historial`
     );
+  };
+
+  const iniciarDescanso = (duracion: number) => {
+    const fin = Date.now() + duracion * 1000;
+    setDescansoFin(fin);
+    setDescansoRestante(duracion);
+    if (userId && typeof window !== "undefined") {
+      localStorage.setItem(keyUsuario(keyDescansoFin), String(fin));
+    }
   };
 
   const formatoTiempo = (s: number) => {
@@ -1111,9 +1207,10 @@ useEffect(() => {
 
   const completados = (diaActual?.ejercicios ?? []).filter((ej) => {
     const s = registros[ej.id] ?? [];
-    return s.length >= ej.series && s.slice(0, ej.series).every((x) => x.kg && x.reps);
+    const cantidad = cantidadSeriesSesion(ej);
+    return (seriesConfirmadas[ej.id] ?? 0) >= cantidad && s.slice(0, cantidad).every((x) => x.kg && x.reps);
   }).length;
-  const seriesCompletadas = (diaActual?.ejercicios ?? []).reduce((acc, ej) => acc + (registros[ej.id] ?? []).filter((x) => x.kg && x.reps).length, 0);
+  const seriesCompletadas = (diaActual?.ejercicios ?? []).reduce((acc, ej) => acc + (seriesConfirmadas[ej.id] ?? 0), 0);
   const kcal = Math.max(0, Math.round((segundos / 60) * 6.2));
 
   const progreso = useMemo(() => {
@@ -2109,7 +2206,7 @@ background:
 linear-gradient(145deg,rgba(23,25,30,.96),rgba(13,15,19,.96));
 box-shadow:0 18px 42px rgba(0,0,0,.24),inset 0 1px 0 rgba(255,255,255,.015)}.vf-card{border-radius:15px;margin-bottom:12px;overflow:hidden}.vf-card-head{display:grid;grid-template-columns:auto 1fr auto;gap:14px;align-items:center;padding:15px}.vf-num{width:44px;height:44px;border-radius:10px;display:grid;place-items:center;background:#0d0f13;border:1px solid rgba(255,48,74,.45);font-weight:1000;color:var(--red)}.vf-title-row{display:flex;gap:8px;align-items:center;flex-wrap:wrap}.vf-ex-title{font-size:18px;font-weight:1000;text-transform:uppercase}.vf-tag{padding:4px 7px;border-radius:6px;border:1px solid rgba(255,48,74,.28);background:rgba(255,48,74,.08);color:#ff7384;font-size:8px;font-weight:900}.vf-prescription{color:#777e88;font-size:10px;margin-top:5px}.vf-anatomia-pro{width:100px;min-width:100px;height:112px;border:1px solid #292d34;border-radius:10px;overflow:hidden;background:#0d0f13;position:relative}.vf-anatomia-pro img{width:100%;height:100%;object-fit:cover}.vf-anatomia-pro span{position:absolute;left:5px;right:5px;bottom:5px;padding:4px;background:rgba(5,6,8,.84);border-radius:5px;font-size:7px;text-align:center}.vf-anatomia-pro.compact{width:76px;min-width:76px;height:86px}.vf-ex-preview>div{grid-template-columns:42px minmax(0,1fr) 76px;align-items:center}.vf-ex-preview .vf-anatomia-pro.compact{justify-self:end}
         .vf-alt-wrap{padding:0 15px 11px}.vf-alt-button,.vf-alt-tools button,.vf-alt-option{border:1px solid #30353d;background:#111419;color:#aab0b8;border-radius:8px;padding:9px;font-size:9px}.vf-alt-button{width:100%}.vf-alt-tools{display:flex;gap:7px;margin-top:7px}.vf-alt-tools button{flex:1}.vf-alt-tools .active,.vf-alt-option.active{border-color:var(--red);color:#fff}.vf-alt-list{display:grid;grid-template-columns:repeat(3,1fr);gap:7px;margin-top:7px}
-        .vf-compare-grid{display:grid;grid-template-columns:1fr 1fr;gap:10px;padding:0 15px 12px}.vf-panel{padding:12px;border:1px solid #292d34;border-radius:11px;background:#0e1014}.vf-panel.today{border-color:rgba(255,48,74,.38)}.vf-panel-head{display:flex;justify-content:space-between;gap:8px;font-size:10px;font-weight:900;margin-bottom:9px}.vf-date{color:#6f7680}.vf-series-row{display:grid;grid-template-columns:30px repeat(3,1fr) 94px;gap:6px;align-items:center;margin-bottom:6px}.vf-slabel{color:var(--red);font-weight:1000}.vf-box,.vf-input{min-height:46px;border:1px solid #30353d;border-radius:8px;background:#0b0d10;color:#fff;text-align:center}.vf-box{display:grid;place-content:center}.vf-box small{font-size:7px;color:#666d76}.vf-input{width:100%;outline:none}.vf-input:focus,.vf-text:focus{border-color:var(--red)}.vf-compare{grid-column:2/6;color:#ff7484;font-size:8px}.vf-series-rest{min-height:46px;border:1px solid rgba(255,48,74,.35);border-radius:8px;background:rgba(255,48,74,.08);color:#fff;font-weight:900;font-size:9px}.vf-series-rest.active{background:linear-gradient(135deg,var(--red2),var(--red));border-color:transparent}.vf-technique{margin-top:10px;border-top:1px solid #292d34;padding-top:10px}.vf-technique summary{cursor:pointer;color:#ff7484;font-size:9px;font-weight:900}.vf-technique-grid{display:grid;grid-template-columns:1fr 1fr;gap:10px;margin-top:10px}.vf-technique-box{border:1px solid #30353d;border-radius:9px;padding:10px;background:#0d0f13}.vf-technique-box h4{margin:0 0 7px;color:#fff}.vf-technique-box ul{margin:0;padding-left:16px;font-size:9px;line-height:1.6;color:#aeb3bb}.vf-technique-tip{margin-top:9px;padding:9px;border-radius:8px;background:rgba(255,48,74,.08);color:#ff9aa6;font-size:9px}.vf-demo{margin-top:10px;border-top:1px solid #292d34;padding-top:10px}.vf-demo summary{cursor:pointer;color:#fff;font-size:9px;font-weight:1000}.vf-demo-wrap{margin-top:10px;border:1px solid rgba(255,48,74,.35);border-radius:10px;overflow:hidden;background:#050608}.vf-demo-video{display:block;width:100%;aspect-ratio:16/9;object-fit:cover;background:#050608}.vf-demo-label{display:flex;justify-content:space-between;gap:8px;align-items:center;padding:8px 10px;color:#aeb3bb;font-size:8px;background:#0d0f13}.vf-demo-live{color:#ff5368;font-weight:1000}.vf-calendar-editor-overlay{position:fixed;inset:0;z-index:120;display:grid;place-items:center;padding:18px;background:rgba(0,0,0,.72);backdrop-filter:blur(8px)}.vf-calendar-editor{width:min(620px,100%);max-height:90vh;overflow:auto;padding:20px;border:1px solid rgba(255,48,74,.48);border-radius:16px;background:linear-gradient(145deg,#17191e,#0d0f13);box-shadow:0 26px 80px rgba(0,0,0,.55),0 0 50px rgba(255,48,74,.12)}.vf-calendar-editor-head{display:flex;align-items:flex-start;justify-content:space-between;gap:12px;margin-bottom:10px}.vf-calendar-editor-head strong{font-size:16px;color:#fff}.vf-calendar-editor-close{width:36px;height:36px;border:1px solid #343840;border-radius:9px;background:#0d0f13;color:#fff;font-weight:900}.vf-calendar-editor-plan{padding:10px 12px;margin:10px 0;border:1px solid #2d3138;border-radius:10px;background:#0d0f13;color:#9da3ad;font-size:10px;line-height:1.55}.vf-calendar-editor-grid{display:grid;grid-template-columns:1fr 1fr;gap:10px;align-items:end}.vf-calendar-editor-actions{display:grid;grid-template-columns:1fr 1fr;gap:9px;margin-top:12px}.vf-share-banner{margin-bottom:14px;padding:14px;border:1px solid rgba(255,48,74,.4);border-radius:12px;background:linear-gradient(120deg,rgba(255,48,74,.10),#111318)}.vf-card-actions{display:grid;grid-template-columns:1fr 180px;gap:9px;padding:0 15px 15px}.vf-save,.vf-primary,.vf-creatine-button{border:0;background:linear-gradient(135deg,var(--red2),var(--red));color:#fff}.vf-save,.vf-rest{min-height:45px;border-radius:9px;font-weight:1000}.vf-rest{border:1px solid #30353d;background:#111419;color:#fff}
+        .vf-compare-grid{display:grid;grid-template-columns:1fr 1fr;gap:10px;padding:0 15px 12px}.vf-panel{padding:12px;border:1px solid #292d34;border-radius:11px;background:#0e1014}.vf-panel.today{border-color:rgba(255,48,74,.38)}.vf-panel-head{display:flex;justify-content:space-between;gap:8px;font-size:10px;font-weight:900;margin-bottom:9px}.vf-date{color:#6f7680}.vf-series-row{display:grid;grid-template-columns:30px repeat(3,1fr) 94px;gap:6px;align-items:center;margin-bottom:6px}.vf-slabel{color:var(--red);font-weight:1000}.vf-box,.vf-input{min-height:46px;border:1px solid #30353d;border-radius:8px;background:#0b0d10;color:#fff;text-align:center}.vf-box{display:grid;place-content:center}.vf-box small{font-size:7px;color:#666d76}.vf-input{width:100%;outline:none}.vf-input:focus,.vf-text:focus{border-color:var(--red)}.vf-compare{grid-column:2/6;color:#ff7484;font-size:8px}.vf-series-rest{min-height:46px;border:1px solid rgba(255,48,74,.35);border-radius:8px;background:rgba(255,48,74,.08);color:#fff;font-weight:900;font-size:9px}.vf-series-rest.active{background:linear-gradient(135deg,var(--red2),var(--red));border-color:transparent}.vf-series-rest.done{border-color:rgba(90,220,130,.45);background:rgba(90,220,130,.10)}.vf-series-row.locked{opacity:.42}.vf-input:disabled,.vf-series-rest:disabled,.vf-save:disabled{cursor:not-allowed;opacity:.48}.vf-session-series{display:flex;align-items:center;gap:7px;margin-top:8px}.vf-session-series button{width:30px;height:28px;border:1px solid #30353d;border-radius:7px;background:#111419;color:#fff;font-weight:1000}.vf-session-series strong{font-size:9px;color:#ff8b98}.vf-rest-status{display:grid;place-items:center;text-align:center;font-size:9px}.vf-technique{margin-top:10px;border-top:1px solid #292d34;padding-top:10px}.vf-technique summary{cursor:pointer;color:#ff7484;font-size:9px;font-weight:900}.vf-technique-grid{display:grid;grid-template-columns:1fr 1fr;gap:10px;margin-top:10px}.vf-technique-box{border:1px solid #30353d;border-radius:9px;padding:10px;background:#0d0f13}.vf-technique-box h4{margin:0 0 7px;color:#fff}.vf-technique-box ul{margin:0;padding-left:16px;font-size:9px;line-height:1.6;color:#aeb3bb}.vf-technique-tip{margin-top:9px;padding:9px;border-radius:8px;background:rgba(255,48,74,.08);color:#ff9aa6;font-size:9px}.vf-demo{margin-top:10px;border-top:1px solid #292d34;padding-top:10px}.vf-demo summary{cursor:pointer;color:#fff;font-size:9px;font-weight:1000}.vf-demo-wrap{margin-top:10px;border:1px solid rgba(255,48,74,.35);border-radius:10px;overflow:hidden;background:#050608}.vf-demo-video{display:block;width:100%;aspect-ratio:16/9;object-fit:cover;background:#050608}.vf-demo-label{display:flex;justify-content:space-between;gap:8px;align-items:center;padding:8px 10px;color:#aeb3bb;font-size:8px;background:#0d0f13}.vf-demo-live{color:#ff5368;font-weight:1000}.vf-calendar-editor-overlay{position:fixed;inset:0;z-index:120;display:grid;place-items:center;padding:18px;background:rgba(0,0,0,.72);backdrop-filter:blur(8px)}.vf-calendar-editor{width:min(620px,100%);max-height:90vh;overflow:auto;padding:20px;border:1px solid rgba(255,48,74,.48);border-radius:16px;background:linear-gradient(145deg,#17191e,#0d0f13);box-shadow:0 26px 80px rgba(0,0,0,.55),0 0 50px rgba(255,48,74,.12)}.vf-calendar-editor-head{display:flex;align-items:flex-start;justify-content:space-between;gap:12px;margin-bottom:10px}.vf-calendar-editor-head strong{font-size:16px;color:#fff}.vf-calendar-editor-close{width:36px;height:36px;border:1px solid #343840;border-radius:9px;background:#0d0f13;color:#fff;font-weight:900}.vf-calendar-editor-plan{padding:10px 12px;margin:10px 0;border:1px solid #2d3138;border-radius:10px;background:#0d0f13;color:#9da3ad;font-size:10px;line-height:1.55}.vf-calendar-editor-grid{display:grid;grid-template-columns:1fr 1fr;gap:10px;align-items:end}.vf-calendar-editor-actions{display:grid;grid-template-columns:1fr 1fr;gap:9px;margin-top:12px}.vf-share-banner{margin-bottom:14px;padding:14px;border:1px solid rgba(255,48,74,.4);border-radius:12px;background:linear-gradient(120deg,rgba(255,48,74,.10),#111318)}.vf-card-actions{display:grid;grid-template-columns:1fr 180px;gap:9px;padding:0 15px 15px}.vf-save,.vf-primary,.vf-creatine-button{border:0;background:linear-gradient(135deg,var(--red2),var(--red));color:#fff}.vf-save,.vf-rest{min-height:45px;border-radius:9px;font-weight:1000}.vf-rest{border:1px solid #30353d;background:#111419;color:#fff}
         .vf-page-title{font-size:32px;margin:12px 0 20px}.vf-page-title:after{content:"";display:block;width:46px;height:3px;background:var(--red);margin-top:8px}.vf-section-card{padding:16px;border-radius:13px;margin-bottom:11px}.vf-muted{color:#777e88;font-size:10px}.vf-history-ex{display:grid;grid-template-columns:1fr auto;gap:10px;padding:10px 0;border-bottom:1px solid #292d34}.vf-mini-series{display:flex;gap:5px;flex-wrap:wrap;margin-top:7px}.vf-mini-chip{padding:5px 7px;border:1px solid #30353d;border-radius:7px;font-size:8px}.vf-progress-grid{display:grid;grid-template-columns:repeat(3,1fr);gap:10px}.vf-record{padding:14px;border-radius:12px}.vf-record-big{font-size:24px;color:var(--red);font-weight:1000}.vf-toolbar{display:flex;gap:8px;flex-wrap:wrap;margin-bottom:12px}.vf-primary,.vf-secondary,.vf-danger{padding:10px 12px;border-radius:9px;font-weight:900}.vf-secondary{border:1px solid #30353d;background:#15181d;color:#fff}.vf-danger{border:1px solid #71323a;background:#29171b;color:#ff9aa6}.vf-routines{display:grid;grid-template-columns:repeat(2,1fr);gap:12px}.vf-generator{padding:16px;margin-bottom:14px;border:1px solid rgba(255,48,74,.35);border-radius:14px;background:linear-gradient(145deg,rgba(255,48,74,.08),#111419)}.vf-generator-grid{display:grid;grid-template-columns:repeat(3,1fr);gap:9px}.vf-generator label{display:grid;gap:5px;font-size:9px;color:#8d949e}.vf-generator-title{display:flex;justify-content:space-between;gap:12px;align-items:center;margin-bottom:12px}.vf-generator-title h2{margin:0;color:#fff}.vf-generator-note{font-size:9px;color:#777e88;line-height:1.5;margin-top:9px}.vf-routine-day{padding:15px;border-radius:13px}.vf-routine-list{padding:0;list-style:none}.vf-routine-list li{padding:8px 0;border-top:1px solid #292d34;font-size:10px}.vf-editor{padding:16px;border-radius:14px}.vf-editor-head,.vf-library-head{display:grid;grid-template-columns:1fr 1fr;gap:8px}.vf-day-tabs{display:flex;gap:7px;flex-wrap:wrap;margin:12px 0}.vf-day-tab,.vf-edit-controls button{border:1px solid #30353d;background:#15181d;color:#fff;border-radius:8px;padding:8px}.vf-day-tab.active{border-color:var(--red)}.vf-edit-ex{display:grid;grid-template-columns:30px 1fr 80px 80px 70px auto;gap:7px;align-items:center;padding:9px 0;border-top:1px solid #292d34}.vf-text{width:100%;border:1px solid #30353d;background:#0d0f13;color:#fff;border-radius:8px;padding:10px;outline:none}.vf-library-head{grid-template-columns:2fr repeat(3,1fr)}.vf-library-grid{display:grid;grid-template-columns:repeat(3,1fr);gap:10px}.vf-lib-card{padding:12px;border-radius:12px}.vf-lib-meta,.vf-lib-muscle{font-size:9px;color:#777e88}.vf-lib-muscle{color:#ff7484}.vf-custom-form{display:grid;grid-template-columns:2fr repeat(4,1fr);gap:7px;margin:10px 0}.vf-anatomy-editor{display:grid;grid-template-columns:1fr auto;gap:7px}.vf-settings-grid{display:grid;grid-template-columns:1fr 1fr;gap:12px}.vf-toggle-row{display:flex;justify-content:space-between;gap:12px;align-items:center;padding:12px 0;border-top:1px solid #292d34}.vf-toggle,.vf-rest-choice{border:1px solid #30353d;background:#111419;color:#aaa;border-radius:8px;padding:9px}.vf-toggle.on,.vf-rest-choice.active{border-color:var(--red);color:#fff;background:rgba(255,48,74,.08)}.vf-rest-options{display:grid;grid-template-columns:repeat(4,1fr);gap:7px;margin-top:12px}.vf-settings-note{color:#777e88;font-size:9px;margin-top:10px}
         .vf-calendar-top{display:grid;grid-template-columns:1fr auto;gap:12px}.vf-calendar-month{display:flex;align-items:center;gap:8px}.vf-calendar-month button{width:38px;height:38px;border:1px solid #30353d;background:#111419;color:#fff;border-radius:8px}.vf-calendar-title{font-size:18px;font-weight:1000}.vf-calendar-controls{display:grid;grid-template-columns:1fr 1fr;gap:8px}.vf-calendar-stats,.vf-creatine-summary{display:grid;grid-template-columns:repeat(3,1fr);gap:8px;margin:12px 0}.vf-creatine-summary{grid-template-columns:repeat(4,1fr)}.vf-calendar-stat,.vf-creatine-stat{padding:12px;border:1px solid var(--line);border-radius:10px;background:#111419;text-align:center}.vf-calendar-stat strong,.vf-creatine-stat strong{display:block;color:var(--red);font-size:20px}.vf-calendar-week,.vf-calendar-grid{display:grid;grid-template-columns:repeat(7,1fr);gap:6px}.vf-calendar-week div{text-align:center;color:#666d76;font-size:9px}.vf-cal-day{min-height:105px;padding:8px;border:1px solid #292d34;border-radius:9px;background:#111419}.vf-cal-day.today,.vf-cal-day.done{border-color:var(--red)}.vf-cal-badge{font-size:8px;color:#ff7484;margin-top:7px}.vf-cal-open,.vf-creatine-day{width:100%;margin-top:7px;padding:5px;border:1px solid #30353d;border-radius:6px;background:#0d0f13;color:#fff;font-size:8px}.vf-creatine-day.taken{border-color:var(--red);background:rgba(255,48,74,.10)}.vf-creatine-note,.vf-calendar-help{color:#777e88;font-size:9px;line-height:1.5}.vf-message{position:fixed;left:50%;bottom:80px;transform:translateX(-50%);z-index:99;padding:10px 14px;border:1px solid var(--red);border-radius:9px;background:#111419;color:#fff;font-size:10px}.vf-bottom{display:none}
         .vf-nutrition-hero{display:flex;justify-content:space-between;align-items:flex-end;gap:18px;margin-bottom:20px}.vf-nutrition-hero h1{margin:4px 0;font-size:clamp(30px,4vw,50px)}.vf-nutrition-hero p{margin:0;color:#7f858f}.vf-nutrition-categories{display:grid;grid-template-columns:repeat(4,1fr);gap:12px}.vf-nutrition-cat{border:1px solid var(--line);border-radius:16px;background:linear-gradient(145deg,#15181d,#0f1115);padding:22px;text-align:left;color:#fff;min-height:160px}.vf-nutrition-cat:hover{border-color:rgba(255,48,74,.45);transform:translateY(-1px)}.vf-nutrition-cat span{font-size:30px}.vf-nutrition-cat h3{font-size:20px;margin:12px 0 5px}.vf-nutrition-cat p{margin:0;color:#727983;font-size:10px}.vf-nutrition-plan-card{margin-top:12px;border:1px solid rgba(255,48,74,.32);border-radius:16px;padding:22px;background:linear-gradient(120deg,rgba(255,48,74,.10),#111318);display:flex;justify-content:space-between;align-items:center;gap:20px}.vf-nutrition-plan-card h3{margin:0 0 6px}.vf-nutrition-toolbar{display:flex;gap:9px;flex-wrap:wrap;margin:14px 0}.vf-nutrition-grid{display:grid;grid-template-columns:repeat(3,minmax(0,1fr));gap:14px}.vf-meal-card{border:1px solid var(--line);border-radius:16px;background:#111318;overflow:hidden}.vf-meal-image{width:100%;aspect-ratio:16/10;object-fit:cover;background:#0b0d11}.vf-meal-placeholder{width:100%;aspect-ratio:16/10;display:grid;place-items:center;background:linear-gradient(145deg,#17191f,#0d0f13);font-size:46px}.vf-meal-body{padding:16px}.vf-meal-body h3{margin:0 0 5px;font-size:18px}.vf-meal-macros{display:grid;grid-template-columns:repeat(4,1fr);gap:6px;margin:13px 0}.vf-meal-macros div{background:#0d0f13;border:1px solid #252932;border-radius:8px;padding:8px;text-align:center}.vf-meal-macros strong{display:block;font-size:12px}.vf-meal-macros small{color:#6e7580;font-size:7px}.vf-meal-actions{display:flex;gap:7px;flex-wrap:wrap}.vf-meal-detail{margin-top:14px;border-top:1px solid #242830;padding-top:13px}.vf-meal-detail h4{color:var(--red);margin:10px 0 7px}.vf-meal-detail ul{margin:0;padding-left:18px;color:#c5c8ce;font-size:11px;line-height:1.7;white-space:normal}.vf-meal-prep{white-space:pre-wrap;color:#c5c8ce;font-size:11px;line-height:1.7}.vf-admin-badge{display:inline-flex;padding:4px 7px;border-radius:6px;background:rgba(255,48,74,.12);border:1px solid rgba(255,48,74,.3);color:#ff7586;font-size:8px;font-weight:900}.vf-nutrition-form{display:grid;gap:10px;margin:15px 0}.vf-nutrition-form-grid{display:grid;grid-template-columns:2fr 1fr 1fr 1fr 1fr;gap:8px}.vf-nutrition-form textarea{min-height:120px;resize:vertical}.vf-plan-modal{border:1px solid rgba(255,48,74,.35);border-radius:14px;background:#12151a;padding:16px;margin:14px 0}.vf-plan-modal-grid{display:grid;grid-template-columns:1fr 1fr auto;gap:8px;align-items:end}.vf-week-plan-head{display:flex;justify-content:space-between;align-items:center;gap:10px;margin:14px 0}.vf-week-plan-head div{font-weight:900;text-transform:capitalize}.vf-meal-week{display:grid;grid-template-columns:repeat(7,minmax(160px,1fr));gap:10px;overflow-x:auto;padding-bottom:8px}.vf-meal-day{border:1px solid var(--line);border-radius:13px;background:#111318;padding:10px;min-width:160px}.vf-meal-day h4{margin:0 0 10px;color:#fff}.vf-meal-day h4 span{display:block;color:#6d747e;font-size:8px;margin-top:3px}.vf-meal-slot{border-top:1px solid #242830;padding:8px 0}.vf-meal-slot:first-of-type{border-top:0}.vf-meal-slot>small{color:var(--red);font-size:7px;font-weight:900}.vf-plan-item{display:flex;justify-content:space-between;gap:6px;align-items:flex-start;margin-top:5px;font-size:9px}.vf-plan-item button{border:0;background:transparent;color:#8a9099;padding:0}.vf-back-nutrition{margin-bottom:12px}.vf-unpublished{opacity:.65;outline:1px dashed #555}.vf-publish-chip{color:#f0b75d;font-size:8px;font-weight:900}
@@ -2285,27 +2382,41 @@ linear-gradient(180deg,rgba(18,12,15,.97),rgba(11,12,15,.98));backdrop-filter:bl
           </section>
 
           {diaActual.ejercicios.map((ej,index)=>{
-            const anterior=ultimoRegistro(ej), actuales=registros[ej.id]??seriesVacias(ej.series), varianteActual=nombreVariante(ej), alternativas=alternativasPara(ej);
+            const cantidadSeries=cantidadSeriesSesion(ej), confirmadas=seriesConfirmadas[ej.id]??0, anterior=ultimoRegistro(ej), actuales=registros[ej.id]??seriesVacias(cantidadSeries), varianteActual=nombreVariante(ej), alternativas=alternativasPara(ej);
             return <section className="vf-card" key={ej.id}>
-              <div className="vf-card-head"><div className="vf-num">{String(index+1).padStart(2,"0")}</div><div><div className="vf-title-row"><div className="vf-ex-title">{varianteActual}</div><span className="vf-tag">{ej.musculo}</span></div><div className="vf-prescription">🎯 {ej.series} series · {ej.reps} reps · RIR {ej.rir} · {ej.equipo}</div></div><AnatomiaPro id={ej.id} musculo={ej.musculo} patron={ej.patron} nombre={ej.nombre} /></div>
+              <div className="vf-card-head"><div className="vf-num">{String(index+1).padStart(2,"0")}</div><div><div className="vf-title-row"><div className="vf-ex-title">{varianteActual}</div><span className="vf-tag">{ej.musculo}</span></div><div className="vf-prescription">🎯 {cantidadSeries} series · {ej.reps} reps · RIR {ej.rir} · {ej.equipo}</div><div className="vf-session-series"><button onClick={()=>cambiarSeriesSesion(ej,-1)} disabled={cantidadSeries<=Math.max(1,confirmadas)}>−</button><strong>{cantidadSeries} SERIES HOY</strong><button onClick={()=>cambiarSeriesSesion(ej,1)} disabled={cantidadSeries>=10}>+</button></div></div><AnatomiaPro id={ej.id} musculo={ej.musculo} patron={ej.patron} nombre={ej.nombre} /></div>
               <div className="vf-alt-wrap">
                 <button className="vf-alt-button" onClick={()=>setAlternativasAbiertas(p=>({...p,[ej.id]:!p[ej.id]}))}>🔄 ¿Está ocupado o no puedes hacerlo? ALTERNAR</button>
                 {alternativasAbiertas[ej.id]&&<><div className="vf-alt-tools"><button className={(modoAlternativa[ej.id]??"inteligente")==="inteligente"?"active":""} onClick={()=>setModoAlternativa(p=>({...p,[ej.id]:"inteligente"}))}>✨ MEJOR ALTERNATIVA</button><button className={modoAlternativa[ej.id]==="patron"?"active":""} onClick={()=>setModoAlternativa(p=>({...p,[ej.id]:"patron"}))}>🎯 MISMO PATRÓN</button><button className={modoAlternativa[ej.id]==="musculo"?"active":""} onClick={()=>setModoAlternativa(p=>({...p,[ej.id]:"musculo"}))}>💪 MISMO MÚSCULO</button></div><div className="vf-alt-list">{alternativas.map(alt=><button key={alt.id} className={`vf-alt-option ${varianteActual===alt.nombre?"active":""}`} onClick={()=>{setVariantes(p=>({...p,[ej.id]:alt.nombre}));setAlternativasAbiertas(p=>({...p,[ej.id]:false}));setMensaje(`🔄 Cambiado a ${alt.nombre}. Series, reps y RIR se mantienen.`)}}><strong>{alt.nombre}</strong><br/><span className="vf-muted">{alt.equipo} · {alt.patron}</span></button>)}</div></>}
               </div>
               <div className="vf-compare-grid">
-                <div className="vf-panel last"><div className="vf-panel-head"><span>📈 ÚLTIMA SESIÓN</span>{anterior&&<span className="vf-date">{anterior.fecha.split(",")[0]}</span>}</div>{Array.from({length:ej.series},(_,i)=>{const s=anterior?.series?.[i];return <div className="vf-series-row" key={i}><div className="vf-slabel">S{i+1}</div><div className="vf-box"><strong>{s?.kg||"—"}</strong><small>KG</small></div><div className="vf-box"><strong>{s?.reps||"—"}</strong><small>REPS</small></div><div className="vf-box"><strong>{s?.rir||"—"}</strong><small>RIR</small></div><div className="vf-box"><strong>—</strong><small>DESCANSO</small></div></div>})}{anterior&&anterior.variante!==varianteActual&&<div className="vf-muted">Último registro: {anterior.variante}</div>}</div>
-                <div className="vf-panel today"><div className="vf-panel-head"><span>✏️ HOY</span><span className="vf-muted">{varianteActual}</span></div>{Array.from({length:ej.series},(_,i)=>{const s=actuales[i]??{kg:"",reps:"",rir:""},comp=compararSerie(ej,i);return <div className="vf-series-row" key={i}><div className="vf-slabel">S{i+1}</div><input className="vf-input" type="number" placeholder="KG" value={s.kg} onChange={e=>setSerie(ej,i,"kg",e.target.value)}/><input className="vf-input" type="number" placeholder="REPS" value={s.reps} onChange={e=>setSerie(ej,i,"reps",e.target.value)}/><input className="vf-input" type="number" placeholder="RIR" value={s.rir} onChange={e=>setSerie(ej,i,"rir",e.target.value)}/><button className={`vf-series-rest ${descansoSerieActiva?.ejId===ej.id&&descansoSerieActiva?.serieIndex===i&&descansoRestante>0?"active":""}`} onClick={()=>{setDescansoSerieActiva({ejId:ej.id,serieIndex:i});setDescansoRestante(ej.descanso??ajustes.descanso)}}>⏱️ {descansoSerieActiva?.ejId===ej.id&&descansoSerieActiva?.serieIndex===i&&descansoRestante>0?`${descansoRestante}s`:`${ej.descanso??ajustes.descanso}s`}</button>{comp&&<div className="vf-compare">{comp}</div>}</div>})}</div>
+                <div className="vf-panel last"><div className="vf-panel-head"><span>📈 ÚLTIMA SESIÓN</span>{anterior&&<span className="vf-date">{anterior.fecha.split(",")[0]}</span>}</div>{Array.from({length:Math.max(cantidadSeries,anterior?.series?.length??0)},(_,i)=>{const s=anterior?.series?.[i];return <div className="vf-series-row" key={i}><div className="vf-slabel">S{i+1}</div><div className="vf-box"><strong>{s?.kg||"—"}</strong><small>KG</small></div><div className="vf-box"><strong>{s?.reps||"—"}</strong><small>REPS</small></div><div className="vf-box"><strong>{s?.rir||"—"}</strong><small>RIR</small></div><div className="vf-box"><strong>—</strong><small>DESCANSO</small></div></div>})}{anterior&&anterior.variante!==varianteActual&&<div className="vf-muted">Último registro: {anterior.variante}</div>}</div>
+                <div className="vf-panel today"><div className="vf-panel-head"><span>✏️ HOY</span><span className="vf-muted">{varianteActual}</span></div>{Array.from({length:cantidadSeries},(_,i)=>{const s=actuales[i]??{kg:"",reps:"",rir:""},comp=compararSerie(ej,i),hecha=i<confirmadas,activa=i===confirmadas,bloqueada=i>confirmadas;return <div className={`vf-series-row ${bloqueada?"locked":""}`} key={i}><div className="vf-slabel">S{i+1}</div><input className="vf-input" disabled={!activa} type="number" placeholder="KG" value={s.kg} onChange={e=>setSerie(ej,i,"kg",e.target.value)}/><input className="vf-input" disabled={!activa} type="number" placeholder="REPS" value={s.reps} onChange={e=>setSerie(ej,i,"reps",e.target.value)}/><input className="vf-input" disabled={!activa} type="number" placeholder="RIR" value={s.rir} onChange={e=>setSerie(ej,i,"rir",e.target.value)}/><button className={`vf-series-rest ${hecha?"done":""} ${descansoSerieActiva?.ejId===ej.id&&descansoSerieActiva?.serieIndex===i&&descansoRestante>0?"active":""}`} disabled={!activa} onClick={()=>completarSerie(ej,i)}>{hecha?"✅ HECHA":bloqueada?"🔒 BLOQUEADA":`✓ SERIE ${i+1}`}</button>{comp&&<div className="vf-compare">{comp}</div>}</div>})}</div>
               </div>
-              <div className="vf-card-actions"><button className="vf-save" onClick={()=>guardarEjercicio(ej)}>💾 GUARDAR ENTRENAMIENTO</button><button className="vf-rest" onClick={()=>setDescansoRestante(ej.descanso??ajustes.descanso)}>⏱️ {descansoRestante>0?`DESCANSO ${descansoRestante}s`:`DESCANSO ${ej.descanso??ajustes.descanso}s`}</button></div>
+              <div className="vf-card-actions"><button className="vf-save" disabled={confirmadas<cantidadSeries} onClick={()=>guardarEjercicio(ej)}>💾 GUARDAR EJERCICIO</button><div className="vf-rest vf-rest-status">{descansoSerieActiva?.ejId===ej.id&&descansoRestante>0?`⏱️ DESCANSO ${descansoRestante}s`:confirmadas>=cantidadSeries?"✅ LISTO PARA GUARDAR":"DESCANSO AUTOMÁTICO"}</div></div>
             </section>
           })}
           {!diaActual.ejercicios.length&&<section className="vf-section-card">Este día todavía no tiene ejercicios. Ve a <strong>RUTINAS</strong> para añadirlos desde la biblioteca.</section>}
           <a className="vf-home" href="/">← Volver al inicio</a>
         </>}
 
-        {vista==="historial"&&<><h1 className="vf-page-title">📚 HISTORIAL</h1>{rutinas.flatMap(r=>r.dias.flatMap(d=>d.ejercicios)).map(ej=>{const lista=[...compactarRegistros(historial[ej.id]??[])].reverse();if(!lista.length)return null;return <section className="vf-section-card" key={ej.id}><div className="vf-history-name">{ej.nombre}</div><div className="vf-muted">{ej.patron} · {lista.length} sesiones</div>{lista.slice(0,8).map((r,i)=><div className="vf-history-ex" key={`${r.fecha}-${i}`}><div><strong>{r.variante}</strong><div className="vf-muted">{r.fecha}</div><div className="vf-mini-series">{r.series.map((s,si)=><span className="vf-mini-chip" key={si}>S{si+1}: {s.kg||"—"}kg · {s.reps||"—"} reps · RIR {s.rir||"—"}</span>)}</div></div><span className="vf-tag">{ej.musculo}</span></div>)}</section>})}{Object.keys(historial).length===0&&<div className="vf-section-card">Todavía no hay entrenamientos guardados.</div>}</>}
+        {vista==="historial"&&<><h1 className="vf-page-title">📚 HISTORIAL</h1>{Object.entries(historial)
+  .flatMap(([ejId, registrosEj]) => {
+    const ej = rutinas.flatMap(r=>r.dias.flatMap(d=>d.ejercicios)).find(x=>x.id===ejId);
+    return compactarRegistros(registrosEj ?? []).map(r => ({ ejId, ej, r }));
+  })
+  .sort((a,b) => {
+    const fechaMs = (fecha:string) => {
+      const [parteFecha, parteHora="00:00:00"] = fecha.split(",").map(x=>x.trim());
+      const [d,m,y] = parteFecha.split("/").map(Number);
+      const [hh=0,mm=0,ss=0] = parteHora.split(":").map(Number);
+      return new Date(y, (m||1)-1, d||1, hh, mm, ss).getTime();
+    };
+    return fechaMs(b.r.fecha) - fechaMs(a.r.fecha);
+  })
+  .map(({ejId,ej,r},i)=><section className="vf-section-card" key={`${ejId}-${r.fecha}-${i}`}><div className="vf-history-name">{ej?.nombre??r.nombre??"Ejercicio"}</div><div className="vf-muted">{ej?.patron??r.patron??"—"} · {r.fecha}</div><div className="vf-history-ex"><div><strong>{r.variante}</strong><div className="vf-mini-series">{r.series.map((s,si)=><span className="vf-mini-chip" key={si}>S{si+1}: {s.kg||"—"}kg · {s.reps||"—"} reps · RIR {s.rir||"—"}</span>)}</div></div>{ej?.musculo&&<span className="vf-tag">{ej.musculo}</span>}</div></section>)}{Object.values(historial).every(lista=>!lista?.length)&&<div className="vf-section-card">Todavía no hay entrenamientos guardados.</div>}</>}
 
-        {vista==="progreso"&&<><h1 className="vf-page-title">📈 PROGRESO Y RÉCORDS</h1><div className="vf-progress-grid">{progreso.filter(p=>p.sesiones>0).map((p,i)=><div className="vf-record" key={`${p.rutina}-${p.dia}-${p.nombre}-${i}`}><div className="vf-muted">{p.rutina} · {p.dia}</div><h3>{p.nombre}</h3><div className="vf-record-big">{p.mejorKg?`${p.mejorKg} KG`:"—"}</div><div className="vf-muted">Récord de peso</div><div style={{marginTop:10}}><strong>🏆 Mejor serie:</strong> {p.mejorTexto}</div><div className="vf-muted">e1RM aprox.: {p.mejorE1rm?`${p.mejorE1rm.toFixed(1)} kg`:"—"}</div><div style={{marginTop:8,color:"#D94B55",fontWeight:900}}>Tendencia: {p.tendencia}</div><div className="vf-muted">{p.sesiones} sesiones guardadas</div></div>)}</div>{progreso.every(p=>p.sesiones===0)&&<div className="vf-section-card">Guarda entrenamientos y aquí aparecerán tus récords y evolución automáticamente.</div>}</>}
+{vista==="progreso"&&<><h1 className="vf-page-title">📈 PROGRESO Y RÉCORDS</h1><div className="vf-progress-grid">{progreso.filter(p=>p.sesiones>0).map((p,i)=><div className="vf-record" key={`${p.rutina}-${p.dia}-${p.nombre}-${i}`}><div className="vf-muted">{p.rutina} · {p.dia}</div><h3>{p.nombre}</h3><div className="vf-record-big">{p.mejorKg?`${p.mejorKg} KG`:"—"}</div><div className="vf-muted">Récord de peso</div><div style={{marginTop:10}}><strong>🏆 Mejor serie:</strong> {p.mejorTexto}</div><div className="vf-muted">e1RM aprox.: {p.mejorE1rm?`${p.mejorE1rm.toFixed(1)} kg`:"—"}</div><div style={{marginTop:8,color:"#D94B55",fontWeight:900}}>Tendencia: {p.tendencia}</div><div className="vf-muted">{p.sesiones} sesiones guardadas</div></div>)}</div>{progreso.every(p=>p.sesiones===0)&&<div className="vf-section-card">Guarda entrenamientos y aquí aparecerán tus récords y evolución automáticamente.</div>}</>}
 
         {vista==="rutinas"&&<><h1 className="vf-page-title">📋 MIS RUTINAS</h1>{cargandoRutinaCompartida&&<div className="vf-share-banner">Cargando rutina compartida...</div>}{rutinaCompartida&&<div className="vf-share-banner"><strong>📥 Te han compartido: {rutinaCompartida.nombre}</strong><div className="vf-muted" style={{margin:"6px 0 10px"}}>{rutinaCompartida.descripcion} · {rutinaCompartida.dias.length} días</div><div className="vf-toolbar" style={{margin:0}}><button className="vf-primary" onClick={guardarRutinaCompartida}>＋ GUARDAR EN MIS RUTINAS</button><button className="vf-secondary" onClick={()=>setRutinaCompartida(null)}>CANCELAR</button></div></div>}<div className="vf-toolbar"><button className="vf-primary" onClick={()=>setMostrarGenerador(v=>!v)}>✨ GENERAR SEGÚN MIS OBJETIVOS</button><button className="vf-secondary" onClick={crearRutina}>＋ CREAR RUTINA</button><button className="vf-secondary" onClick={()=>setVista("biblioteca")}>📚 BIBLIOTECA ({biblioteca.length})</button></div>
           {mostrarGenerador&&<section className="vf-generator">
