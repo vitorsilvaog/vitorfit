@@ -781,6 +781,9 @@ const ultimoRegistroHistorial =
   const [rutinaPlanId, setRutinaPlanId] = useState(DEFAULT_ROUTINES[0].id);
   const [diaPlanIndex, setDiaPlanIndex] = useState(0);
   const [creatina, setCreatina] = useState<CreatinaMap>({});
+  const [splashVisible, setSplashVisible] = useState(true);
+  const [splashLeaving, setSplashLeaving] = useState(false);
+  const [splashProgress, setSplashProgress] = useState(0);
   const [userId, setUserId] = useState<string | null>(null);
   const keyUsuario = (base: string) =>
   userId ? `${base}-${userId}` : base;
@@ -799,6 +802,53 @@ const ultimoRegistroHistorial =
     material: "gimnasio",
     evitar: "",
   });
+
+  // Splash de entrada VitorFit: dura ~6,2 s y desaparece con una transición suave.
+  // Solo se ejecuta al montar esta página; cambiar de sección no vuelve a mostrarla.
+  useEffect(() => {
+    if (typeof window === "undefined") return;
+
+    const DURACION = 6200;
+    const inicio = performance.now();
+    let raf = 0;
+    let cierre: number | undefined;
+
+    const calcularProgreso = (ms: number) => {
+      if (ms < 450) return 0;
+      const t = ms - 450;
+      if (t < 1250) return Math.round((t / 1250) * 30);
+      if (t < 3350) return Math.round(30 + ((t - 1250) / 2100) * 47);
+      if (t < 4750) return Math.round(77 + ((t - 3350) / 1400) * 16);
+      return Math.min(100, Math.round(93 + ((t - 4750) / 1000) * 7));
+    };
+
+    const animar = (ahora: number) => {
+      const transcurrido = ahora - inicio;
+      setSplashProgress(calcularProgreso(transcurrido));
+
+      if (transcurrido < DURACION) {
+        raf = window.requestAnimationFrame(animar);
+        return;
+      }
+
+      setSplashProgress(100);
+      setSplashLeaving(true);
+      cierre = window.setTimeout(() => setSplashVisible(false), 650);
+    };
+
+    raf = window.requestAnimationFrame(animar);
+    return () => {
+      window.cancelAnimationFrame(raf);
+      if (cierre) window.clearTimeout(cierre);
+    };
+  }, []);
+
+  useEffect(() => {
+    if (typeof document === "undefined" || !splashVisible) return;
+    const overflowAnterior = document.body.style.overflow;
+    document.body.style.overflow = "hidden";
+    return () => { document.body.style.overflow = overflowAnterior; };
+  }, [splashVisible]);
 
   const biblioteca = useMemo(() => [...BUILTIN_LIBRARY, ...bibliotecaPersonal], [bibliotecaPersonal]);
   const rutinaActual = rutinas.find((r) => r.id === rutinaActualId) ?? rutinas[0] ?? DEFAULT_ROUTINES[0];
@@ -2236,6 +2286,32 @@ padding:0;position:relative}
 .vf-app:before{content:"";position:fixed;inset:0;pointer-events:none;z-index:0;background:
 linear-gradient(180deg,rgba(255,255,255,.012),transparent 24%),
 radial-gradient(circle at 50% -10%,rgba(255,48,74,.11),transparent 42%)}
+
+/* ===== SPLASH VITORFIT PRO ===== */
+.vf-splash{position:fixed;inset:0;z-index:9999;overflow:hidden;display:grid;place-items:center;background-color:#000;background-image:url("/vitorfit-splash-bg.png");background-repeat:no-repeat;background-position:center center;background-size:contain;opacity:1;transform:scale(1);transition:opacity .75s ease,transform .75s cubic-bezier(.2,.8,.2,1)}
+.vf-splash.leaving{opacity:0;transform:scale(1.018);pointer-events:none}
+.vf-splash-bg,.vf-splash-gym,.vf-splash-center{display:none!important}
+.vf-splash:before{content:"";position:absolute;inset:0;pointer-events:none;background:linear-gradient(90deg,rgba(0,0,0,.86),transparent 22%,transparent 78%,rgba(0,0,0,.86));z-index:1}
+.vf-splash:after{content:"";position:absolute;inset:0;pointer-events:none;background:linear-gradient(180deg,rgba(0,0,0,.02) 0%,transparent 68%,rgba(0,0,0,.12) 100%);z-index:1}
+.vf-splash-bottom{position:absolute;left:50%;bottom:max(6.3vh,env(safe-area-inset-bottom) + 22px);transform:translateX(-50%);width:min(46vh,560px);max-width:72vw;z-index:3;text-align:center}
+.vf-splash-loading{margin-bottom:13px;color:#ff243c;font-size:clamp(15px,1.4vw,22px);font-weight:900;letter-spacing:6px;text-transform:uppercase;text-shadow:0 2px 12px #000,0 0 18px rgba(255,25,48,.3)}
+.vf-splash-track{position:relative;height:14px;border-radius:999px;padding:2px;background:#08090b;border:2px solid rgba(255,255,255,.13);box-shadow:inset 0 3px 10px rgba(0,0,0,.95),0 0 10px rgba(0,0,0,.7)}
+.vf-splash-track i{position:relative;display:block;height:100%;border-radius:inherit;background:linear-gradient(180deg,#ff4658 0%,#ff1732 45%,#c90019 100%);box-shadow:0 0 10px rgba(255,20,43,.9),0 0 22px rgba(255,20,43,.35);transition:width .1s linear}
+.vf-splash-track i:after{content:"";position:absolute;inset:1px 3px auto 3px;height:35%;border-radius:999px;background:rgba(255,255,255,.35)}
+.vf-splash-percent{position:absolute;right:0;top:-20px;color:transparent;font-size:1px}
+@media(max-aspect-ratio:3/4){
+  .vf-splash{background-size:cover;background-position:center center}
+  .vf-splash:before{background:linear-gradient(180deg,rgba(0,0,0,.04),transparent 72%,rgba(0,0,0,.18))}
+  .vf-splash-bottom{width:68vw;max-width:430px;bottom:max(7vh,env(safe-area-inset-bottom) + 24px)}
+  .vf-splash-loading{font-size:17px;letter-spacing:5px;margin-bottom:12px}
+  .vf-splash-track{height:15px}
+}
+@media(max-width:760px) and (max-aspect-ratio:3/4){
+  .vf-splash{background-position:center center}
+  .vf-splash-bottom{width:70vw;bottom:max(7.2vh,env(safe-area-inset-bottom) + 22px)}
+}
+/* ===== FIN SPLASH ===== */
+
 .vf-shell{position:relative;z-index:1}
         .vf-shell{width:100%;min-height:100vh;display:grid;grid-template-columns:260px minmax(0,1fr)}
         .vf-sidebar{position:sticky;top:0;height:100vh;padding:26px 18px;border-right:1px solid rgba(255,48,74,.16);background:
@@ -2259,7 +2335,7 @@ box-shadow:0 18px 42px rgba(0,0,0,.24),inset 0 1px 0 rgba(255,255,255,.015)}.vf-
         .vf-alt-wrap{padding:0 15px 11px}.vf-alt-button,.vf-alt-tools button,.vf-alt-option{border:1px solid #30353d;background:#111419;color:#aab0b8;border-radius:8px;padding:9px;font-size:9px}.vf-alt-button{width:100%}.vf-alt-tools{display:flex;gap:7px;margin-top:7px}.vf-alt-tools button{flex:1}.vf-alt-tools .active,.vf-alt-option.active{border-color:var(--red);color:#fff}.vf-alt-list{display:grid;grid-template-columns:repeat(3,1fr);gap:7px;margin-top:7px}
         .vf-compare-grid{display:grid;grid-template-columns:1fr 1fr;gap:10px;padding:0 15px 12px}.vf-panel{padding:12px;border:1px solid #292d34;border-radius:11px;background:#0e1014}.vf-panel.today{border-color:rgba(255,48,74,.38)}.vf-panel-head{display:flex;justify-content:space-between;gap:8px;font-size:10px;font-weight:900;margin-bottom:9px}.vf-date{color:#6f7680}.vf-series-row{display:grid;grid-template-columns:30px repeat(3,1fr) 94px;gap:6px;align-items:center;margin-bottom:6px}.vf-slabel{color:var(--red);font-weight:1000}.vf-box,.vf-input{min-height:46px;border:1px solid #30353d;border-radius:8px;background:#0b0d10;color:#fff;text-align:center}.vf-box{display:grid;place-content:center}.vf-box small{font-size:7px;color:#666d76}.vf-input{width:100%;outline:none}.vf-input:focus,.vf-text:focus{border-color:var(--red)}.vf-compare{grid-column:2/6;color:#ff7484;font-size:8px}.vf-series-rest{min-height:46px;border:1px solid rgba(255,48,74,.35);border-radius:8px;background:rgba(255,48,74,.08);color:#fff;font-weight:900;font-size:9px}.vf-series-rest.active{background:linear-gradient(135deg,var(--red2),var(--red));border-color:transparent}.vf-series-rest.done{border-color:rgba(90,220,130,.45);background:rgba(90,220,130,.10)}.vf-series-row.locked{opacity:.42}.vf-input:disabled,.vf-series-rest:disabled,.vf-save:disabled{cursor:not-allowed;opacity:.48}.vf-session-series{display:flex;align-items:center;gap:7px;margin-top:8px}.vf-session-series button{width:30px;height:28px;border:1px solid #30353d;border-radius:7px;background:#111419;color:#fff;font-weight:1000}.vf-session-series strong{font-size:9px;color:#ff8b98}.vf-rest-status{display:grid;place-items:center;text-align:center;font-size:9px}.vf-technique{margin-top:10px;border-top:1px solid #292d34;padding-top:10px}.vf-technique summary{cursor:pointer;color:#ff7484;font-size:9px;font-weight:900}.vf-technique-grid{display:grid;grid-template-columns:1fr 1fr;gap:10px;margin-top:10px}.vf-technique-box{border:1px solid #30353d;border-radius:9px;padding:10px;background:#0d0f13}.vf-technique-box h4{margin:0 0 7px;color:#fff}.vf-technique-box ul{margin:0;padding-left:16px;font-size:9px;line-height:1.6;color:#aeb3bb}.vf-technique-tip{margin-top:9px;padding:9px;border-radius:8px;background:rgba(255,48,74,.08);color:#ff9aa6;font-size:9px}.vf-demo{margin-top:10px;border-top:1px solid #292d34;padding-top:10px}.vf-demo summary{cursor:pointer;color:#fff;font-size:9px;font-weight:1000}.vf-demo-wrap{margin-top:10px;border:1px solid rgba(255,48,74,.35);border-radius:10px;overflow:hidden;background:#050608}.vf-demo-video{display:block;width:100%;aspect-ratio:16/9;object-fit:cover;background:#050608}.vf-demo-label{display:flex;justify-content:space-between;gap:8px;align-items:center;padding:8px 10px;color:#aeb3bb;font-size:8px;background:#0d0f13}.vf-demo-live{color:#ff5368;font-weight:1000}.vf-calendar-editor-overlay{position:fixed;inset:0;z-index:120;display:grid;place-items:center;padding:18px;background:rgba(0,0,0,.72);backdrop-filter:blur(8px)}.vf-calendar-editor{width:min(620px,100%);max-height:90vh;overflow:auto;padding:20px;border:1px solid rgba(255,48,74,.48);border-radius:16px;background:linear-gradient(145deg,#17191e,#0d0f13);box-shadow:0 26px 80px rgba(0,0,0,.55),0 0 50px rgba(255,48,74,.12)}.vf-calendar-editor-head{display:flex;align-items:flex-start;justify-content:space-between;gap:12px;margin-bottom:10px}.vf-calendar-editor-head strong{font-size:16px;color:#fff}.vf-calendar-editor-close{width:36px;height:36px;border:1px solid #343840;border-radius:9px;background:#0d0f13;color:#fff;font-weight:900}.vf-calendar-editor-plan{padding:10px 12px;margin:10px 0;border:1px solid #2d3138;border-radius:10px;background:#0d0f13;color:#9da3ad;font-size:10px;line-height:1.55}.vf-calendar-editor-grid{display:grid;grid-template-columns:1fr 1fr;gap:10px;align-items:end}.vf-calendar-editor-actions{display:grid;grid-template-columns:1fr 1fr;gap:9px;margin-top:12px}.vf-share-banner{margin-bottom:14px;padding:14px;border:1px solid rgba(255,48,74,.4);border-radius:12px;background:linear-gradient(120deg,rgba(255,48,74,.10),#111318)}.vf-card-actions{display:grid;grid-template-columns:1fr 180px;gap:9px;padding:0 15px 15px}.vf-save,.vf-primary,.vf-creatine-button{border:0;background:linear-gradient(135deg,var(--red2),var(--red));color:#fff}.vf-save,.vf-rest{min-height:45px;border-radius:9px;font-weight:1000}.vf-rest{border:1px solid #30353d;background:#111419;color:#fff}
         .vf-page-title{font-size:32px;margin:12px 0 20px}.vf-page-title:after{content:"";display:block;width:46px;height:3px;background:var(--red);margin-top:8px}.vf-section-card{padding:16px;border-radius:13px;margin-bottom:11px}.vf-muted{color:#777e88;font-size:10px}.vf-history-ex{display:grid;grid-template-columns:1fr auto;gap:10px;padding:10px 0;border-bottom:1px solid #292d34}.vf-mini-series{display:flex;gap:5px;flex-wrap:wrap;margin-top:7px}.vf-mini-chip{padding:5px 7px;border:1px solid #30353d;border-radius:7px;font-size:8px}.vf-progress-grid{display:grid;grid-template-columns:repeat(3,1fr);gap:10px}.vf-record{padding:14px;border-radius:12px}.vf-record-big{font-size:24px;color:var(--red);font-weight:1000}.vf-toolbar{display:flex;gap:8px;flex-wrap:wrap;margin-bottom:12px}.vf-primary,.vf-secondary,.vf-danger{padding:10px 12px;border-radius:9px;font-weight:900}.vf-secondary{border:1px solid #30353d;background:#15181d;color:#fff}.vf-danger{border:1px solid #71323a;background:#29171b;color:#ff9aa6}.vf-routines{display:grid;grid-template-columns:repeat(2,1fr);gap:12px}.vf-generator{padding:16px;margin-bottom:14px;border:1px solid rgba(255,48,74,.35);border-radius:14px;background:linear-gradient(145deg,rgba(255,48,74,.08),#111419)}.vf-generator-grid{display:grid;grid-template-columns:repeat(3,1fr);gap:9px}.vf-generator label{display:grid;gap:5px;font-size:9px;color:#8d949e}.vf-generator-title{display:flex;justify-content:space-between;gap:12px;align-items:center;margin-bottom:12px}.vf-generator-title h2{margin:0;color:#fff}.vf-generator-note{font-size:9px;color:#777e88;line-height:1.5;margin-top:9px}.vf-routine-day{padding:15px;border-radius:13px}.vf-routine-list{padding:0;list-style:none}.vf-routine-list li{padding:8px 0;border-top:1px solid #292d34;font-size:10px}.vf-editor{padding:16px;border-radius:14px}.vf-editor-head,.vf-library-head{display:grid;grid-template-columns:1fr 1fr;gap:8px}.vf-day-tabs{display:flex;gap:7px;flex-wrap:wrap;margin:12px 0}.vf-day-tab,.vf-edit-controls button{border:1px solid #30353d;background:#15181d;color:#fff;border-radius:8px;padding:8px}.vf-day-tab.active{border-color:var(--red)}.vf-edit-ex{display:grid;grid-template-columns:30px 1fr 80px 80px 70px auto;gap:7px;align-items:center;padding:9px 0;border-top:1px solid #292d34}.vf-text{width:100%;border:1px solid #30353d;background:#0d0f13;color:#fff;border-radius:8px;padding:10px;outline:none}.vf-library-head{grid-template-columns:2fr repeat(3,1fr)}.vf-library-grid{display:grid;grid-template-columns:repeat(3,1fr);gap:10px}.vf-lib-card{padding:12px;border-radius:12px}.vf-lib-meta,.vf-lib-muscle{font-size:9px;color:#777e88}.vf-lib-muscle{color:#ff7484}.vf-custom-form{display:grid;grid-template-columns:2fr repeat(4,1fr);gap:7px;margin:10px 0}.vf-anatomy-editor{display:grid;grid-template-columns:1fr auto;gap:7px}.vf-settings-grid{display:grid;grid-template-columns:1fr 1fr;gap:12px}.vf-toggle-row{display:flex;justify-content:space-between;gap:12px;align-items:center;padding:12px 0;border-top:1px solid #292d34}.vf-toggle,.vf-rest-choice{border:1px solid #30353d;background:#111419;color:#aaa;border-radius:8px;padding:9px}.vf-toggle.on,.vf-rest-choice.active{border-color:var(--red);color:#fff;background:rgba(255,48,74,.08)}.vf-rest-options{display:grid;grid-template-columns:repeat(4,1fr);gap:7px;margin-top:12px}.vf-settings-note{color:#777e88;font-size:9px;margin-top:10px}
-        .vf-calendar-top{display:grid;grid-template-columns:1fr auto;gap:12px}.vf-calendar-month{display:flex;align-items:center;gap:8px}.vf-calendar-month button{width:38px;height:38px;border:1px solid #30353d;background:#111419;color:#fff;border-radius:8px}.vf-calendar-title{font-size:18px;font-weight:1000}.vf-calendar-controls{display:grid;grid-template-columns:1fr 1fr;gap:8px}.vf-calendar-stats,.vf-creatine-summary{display:grid;grid-template-columns:repeat(3,1fr);gap:8px;margin:12px 0}.vf-creatine-summary{grid-template-columns:repeat(4,1fr)}.vf-calendar-stat,.vf-creatine-stat{padding:12px;border:1px solid var(--line);border-radius:10px;background:#111419;text-align:center}.vf-calendar-stat strong,.vf-creatine-stat strong{display:block;color:var(--red);font-size:20px}.vf-calendar-week,.vf-calendar-grid{display:grid;grid-template-columns:repeat(7,1fr);gap:6px}.vf-calendar-week div{text-align:center;color:#666d76;font-size:9px}.vf-cal-day{min-height:105px;padding:8px;border:1px solid #292d34;border-radius:9px;background:#111419}.vf-cal-day.today,.vf-cal-day.done{border-color:var(--red)}.vf-cal-badge{font-size:8px;color:#ff7484;margin-top:7px}.vf-cal-open,.vf-creatine-day{width:100%;margin-top:7px;padding:5px;border:1px solid #30353d;border-radius:6px;background:#0d0f13;color:#fff;font-size:8px}.vf-creatine-day.taken{border-color:var(--red);background:rgba(255,48,74,.10)}.vf-creatine-note,.vf-calendar-help{color:#777e88;font-size:9px;line-height:1.5}.vf-message{position:fixed;left:50%;bottom:80px;transform:translateX(-50%);z-index:99;padding:10px 14px;border:1px solid var(--red);border-radius:9px;background:#111419;color:#fff;font-size:10px}.vf-bottom{display:none}
+        .vf-calendar-top{display:grid;grid-template-columns:1fr auto;gap:12px}.vf-calendar-month{display:flex;align-items:center;gap:8px}.vf-calendar-month button{width:38px;height:38px;border:1px solid #30353d;background:#111419;color:#fff;border-radius:8px}.vf-calendar-title{font-size:18px;font-weight:1000}.vf-calendar-controls{display:grid;grid-template-columns:1fr 1fr;gap:8px}.vf-calendar-stats,.vf-creatine-summary{display:grid;grid-template-columns:repeat(3,1fr);gap:8px;margin:12px 0}.vf-creatine-summary{grid-template-columns:repeat(4,1fr)}.vf-calendar-stat,.vf-creatine-stat{padding:12px;border:1px solid var(--line);border-radius:10px;background:#111419;text-align:center}.vf-calendar-stat strong,.vf-creatine-stat strong{display:block;color:var(--red);font-size:20px}.vf-calendar-week,.vf-calendar-grid{display:grid;grid-template-columns:repeat(7,1fr);gap:6px}.vf-calendar-week div{text-align:center;color:#666d76;font-size:9px}.vf-cal-day{position:relative;min-height:105px;padding:8px;border:1px solid #292d34;border-radius:9px;background:#111419;transition:border-color .18s ease,box-shadow .18s ease,transform .18s ease}.vf-cal-day.today{border-color:var(--red)}.vf-cal-day.done{border-color:#35d07f;box-shadow:inset 0 0 0 1px rgba(53,208,127,.12),0 0 18px rgba(53,208,127,.06)}.vf-done-tick{position:absolute;top:6px;right:6px;width:21px;height:21px;border-radius:50%;display:grid;place-items:center;background:#23c875;color:#04170d;border:1px solid #6ff0ac;box-shadow:0 0 15px rgba(35,200,117,.32);font-size:13px;font-weight:1000;animation:vfCheckPop .28s cubic-bezier(.2,.9,.25,1.35)}.vf-cal-badge{font-size:8px;color:#ff7484;margin-top:7px;padding-right:18px}.vf-cal-badge.vf-cal-done{color:#54df96}.vf-cal-open,.vf-creatine-day{width:100%;margin-top:7px;padding:5px;border:1px solid #30353d;border-radius:6px;background:#0d0f13;color:#fff;font-size:8px}.vf-creatine-day{transition:all .18s ease}.vf-creatine-day.taken{border-color:#35d07f;background:linear-gradient(135deg,rgba(35,200,117,.17),rgba(35,200,117,.07));color:#7af1b0;box-shadow:inset 0 0 0 1px rgba(35,200,117,.08)}.vf-creatine-check{display:inline-grid;place-items:center;width:16px;height:16px;margin-right:3px;border-radius:50%;background:#23c875;color:#04170d;font-size:11px;font-weight:1000;vertical-align:-3px;animation:vfCheckPop .28s cubic-bezier(.2,.9,.25,1.35)}.vf-creatine-today{margin:13px 0 4px;padding:10px 12px;border:1px solid #2a2e35;border-radius:10px;background:#0d0f13;display:flex;align-items:center;justify-content:center;gap:8px;color:#858b94;font-size:9px;font-weight:900}.vf-creatine-today.done{border-color:rgba(53,208,127,.65);background:rgba(35,200,117,.09);color:#63e9a1}.vf-creatine-today>span{width:22px;height:22px;border-radius:50%;display:grid;place-items:center;background:#181c22}.vf-creatine-today.done>span{background:#23c875;color:#04170d;box-shadow:0 0 14px rgba(35,200,117,.25)}.vf-creatine-note,.vf-calendar-help{color:#777e88;font-size:9px;line-height:1.5}@keyframes vfCheckPop{0%{transform:scale(.4);opacity:.2}70%{transform:scale(1.18);opacity:1}100%{transform:scale(1)}}.vf-message{position:fixed;left:50%;bottom:80px;transform:translateX(-50%);z-index:99;padding:10px 14px;border:1px solid var(--red);border-radius:9px;background:#111419;color:#fff;font-size:10px}.vf-bottom{display:none}
         .vf-nutrition-hero{display:flex;justify-content:space-between;align-items:flex-end;gap:18px;margin-bottom:20px}.vf-nutrition-hero h1{margin:4px 0;font-size:clamp(30px,4vw,50px)}.vf-nutrition-hero p{margin:0;color:#7f858f}.vf-nutrition-categories{display:grid;grid-template-columns:repeat(4,1fr);gap:12px}.vf-nutrition-cat{border:1px solid var(--line);border-radius:16px;background:linear-gradient(145deg,#15181d,#0f1115);padding:22px;text-align:left;color:#fff;min-height:160px}.vf-nutrition-cat:hover{border-color:rgba(255,48,74,.45);transform:translateY(-1px)}.vf-nutrition-cat span{font-size:30px}.vf-nutrition-cat h3{font-size:20px;margin:12px 0 5px}.vf-nutrition-cat p{margin:0;color:#727983;font-size:10px}.vf-nutrition-plan-card{margin-top:12px;border:1px solid rgba(255,48,74,.32);border-radius:16px;padding:22px;background:linear-gradient(120deg,rgba(255,48,74,.10),#111318);display:flex;justify-content:space-between;align-items:center;gap:20px}.vf-nutrition-plan-card h3{margin:0 0 6px}.vf-nutrition-toolbar{display:flex;gap:9px;flex-wrap:wrap;margin:14px 0}.vf-nutrition-grid{display:grid;grid-template-columns:repeat(3,minmax(0,1fr));gap:14px}.vf-meal-card{border:1px solid var(--line);border-radius:16px;background:#111318;overflow:hidden}.vf-meal-image{width:100%;aspect-ratio:16/10;object-fit:cover;background:#0b0d11}.vf-meal-placeholder{width:100%;aspect-ratio:16/10;display:grid;place-items:center;background:linear-gradient(145deg,#17191f,#0d0f13);font-size:46px}.vf-meal-body{padding:16px}.vf-meal-body h3{margin:0 0 5px;font-size:18px}.vf-meal-macros{display:grid;grid-template-columns:repeat(4,1fr);gap:6px;margin:13px 0}.vf-meal-macros div{background:#0d0f13;border:1px solid #252932;border-radius:8px;padding:8px;text-align:center}.vf-meal-macros strong{display:block;font-size:12px}.vf-meal-macros small{color:#6e7580;font-size:7px}.vf-meal-actions{display:flex;gap:7px;flex-wrap:wrap}.vf-meal-detail{margin-top:14px;border-top:1px solid #242830;padding-top:13px}.vf-meal-detail h4{color:var(--red);margin:10px 0 7px}.vf-meal-detail ul{margin:0;padding-left:18px;color:#c5c8ce;font-size:11px;line-height:1.7;white-space:normal}.vf-meal-prep{white-space:pre-wrap;color:#c5c8ce;font-size:11px;line-height:1.7}.vf-admin-badge{display:inline-flex;padding:4px 7px;border-radius:6px;background:rgba(255,48,74,.12);border:1px solid rgba(255,48,74,.3);color:#ff7586;font-size:8px;font-weight:900}.vf-nutrition-form{display:grid;gap:10px;margin:15px 0}.vf-nutrition-form-grid{display:grid;grid-template-columns:2fr 1fr 1fr 1fr 1fr;gap:8px}.vf-nutrition-form textarea{min-height:120px;resize:vertical}.vf-plan-modal{border:1px solid rgba(255,48,74,.35);border-radius:14px;background:#12151a;padding:16px;margin:14px 0}.vf-plan-modal-grid{display:grid;grid-template-columns:1fr 1fr auto;gap:8px;align-items:end}.vf-week-plan-head{display:flex;justify-content:space-between;align-items:center;gap:10px;margin:14px 0}.vf-week-plan-head div{font-weight:900;text-transform:capitalize}.vf-meal-week{display:grid;grid-template-columns:repeat(7,minmax(160px,1fr));gap:10px;overflow-x:auto;padding-bottom:8px}.vf-meal-day{border:1px solid var(--line);border-radius:13px;background:#111318;padding:10px;min-width:160px}.vf-meal-day h4{margin:0 0 10px;color:#fff}.vf-meal-day h4 span{display:block;color:#6d747e;font-size:8px;margin-top:3px}.vf-meal-slot{border-top:1px solid #242830;padding:8px 0}.vf-meal-slot:first-of-type{border-top:0}.vf-meal-slot>small{color:var(--red);font-size:7px;font-weight:900}.vf-plan-item{display:flex;justify-content:space-between;gap:6px;align-items:flex-start;margin-top:5px;font-size:9px}.vf-plan-item button{border:0;background:transparent;color:#8a9099;padding:0}.vf-back-nutrition{margin-bottom:12px}.vf-unpublished{opacity:.65;outline:1px dashed #555}.vf-publish-chip{color:#f0b75d;font-size:8px;font-weight:900}
         @media(max-width:1050px){.vf-shell{grid-template-columns:210px 1fr}.vf-content{padding:22px 24px 100px}.vf-home-metrics{grid-template-columns:1fr 1fr}.vf-home-grid{grid-template-columns:1fr}.vf-next-workout{grid-row:auto}.vf-library-grid{grid-template-columns:1fr 1fr}.vf-nutrition-categories{grid-template-columns:1fr 1fr}.vf-nutrition-grid{grid-template-columns:1fr 1fr}}
         @media(max-width:760px){.vf-shell{display:block}.vf-sidebar{display:none}.vf-content{padding:14px 12px 110px}.vf-topbar{grid-template-columns:1fr auto}.vf-brand{display:flex;align-items:center;gap:8px}.vf-logo{width:42px;height:42px}.vf-brand-title{font-weight:1000}.vf-brand-title span{color:var(--red)}.vf-brand-sub{font-size:7px;color:#666d76}.vf-day{grid-column:1/-1;grid-row:2}.vf-actions{display:none}.vf-dashboard-head{align-items:flex-start;flex-direction:column}.vf-dashboard-head h1{font-size:38px}.vf-hero-cta{width:100%}.vf-home-metrics{grid-template-columns:1fr 1fr}.vf-stats{grid-template-columns:1fr 1fr}.vf-stat:nth-child(2){border-right:0}.vf-stat:nth-child(-n+2){border-bottom:1px solid var(--line)}.vf-compare-grid{grid-template-columns:1fr}.vf-card-actions{grid-template-columns:1fr}.vf-routines,.vf-progress-grid{grid-template-columns:1fr}.vf-library-head,.vf-custom-form,.vf-editor-head,.vf-settings-grid{grid-template-columns:1fr}.vf-library-grid{grid-template-columns:1fr}.vf-nutrition-categories,.vf-nutrition-grid{grid-template-columns:1fr}.vf-nutrition-form-grid,.vf-plan-modal-grid{grid-template-columns:1fr}.vf-nutrition-plan-card,.vf-nutrition-hero{align-items:stretch;flex-direction:column}.vf-bottom{position:fixed;display:grid;grid-template-columns:repeat(5,1fr);left:6px;right:6px;bottom:6px;z-index:80;border:1px solid rgba(255,48,74,.18);border-radius:13px;overflow:hidden;background:
@@ -2270,6 +2346,49 @@ linear-gradient(180deg,rgba(18,12,15,.97),rgba(11,12,15,.98));backdrop-filter:bl
         
 
       `}</style>
+
+ {splashVisible && (
+   <div className={`vf-splash ${splashLeaving ? "leaving" : ""}`} aria-label="VitorFit cargando">
+     <div className="vf-splash-bg" aria-hidden="true" />
+     <div className="vf-splash-gym" aria-hidden="true">
+       <div className="vf-splash-left" />
+       <div className="vf-splash-right" />
+       <div className="vf-splash-floor" />
+       <div className="vf-splash-fog" />
+       <div className="vf-splash-embers" />
+       <div className="vf-splash-light left" />
+       <div className="vf-splash-light right" />
+       <div className="vf-splash-redline one" />
+       <div className="vf-splash-redline two" />
+       <div className="vf-splash-redline three" />
+     </div>
+
+     <div className="vf-splash-center">
+       <div className="vf-splash-halo" aria-hidden="true" />
+       <div className="vf-splash-logo-wrap">
+         <div className="vf-splash-barbell" aria-hidden="true">
+           <span className="plate" />
+           <span className="bar" />
+           <span className="plate" />
+         </div>
+         <img className="vf-splash-logo" src="/vitorfit-logo.png" alt="VitorFit" />
+       </div>
+       <div className="vf-splash-wordmark" aria-label="VitorFit">
+         <span className="vitor">VITOR</span>
+         <span className="fit">FIT</span>
+       </div>
+       <div className="vf-splash-tagline">MÁS QUE UN ENTRENAMIENTO</div>
+     </div>
+
+     <div className="vf-splash-bottom">
+       <div className="vf-splash-loading">CARGANDO...</div>
+       <div className="vf-splash-track">
+         <i style={{ width: `${splashProgress}%` }} />
+         <span className="vf-splash-percent">{splashProgress}%</span>
+       </div>
+     </div>
+   </div>
+ )}
 
  <div className="vf-shell">
 
@@ -2419,7 +2538,15 @@ linear-gradient(180deg,rgba(18,12,15,.97),rgba(11,12,15,.98));backdrop-filter:bl
 </article>
 
             <article className="vf-creatine-home">
-              <div className="vf-card-kicker">GYM + CREATINA</div><h3>Constancia diaria</h3><div className="vf-creatine-circle"><strong>{estadisticasCreatina.porcentaje}%</strong><span>este mes</span></div><p>{estadisticasCreatina.tomadosMes} tomas registradas · mejor racha {estadisticasCreatina.mejorRacha}</p><button onClick={()=>setVista("calendario")}>ABRIR CALENDARIO</button>
+              <div className="vf-card-kicker">GYM + CREATINA</div>
+              <h3>Constancia diaria</h3>
+              <div className="vf-creatine-circle"><strong>{estadisticasCreatina.porcentaje}%</strong><span>este mes</span></div>
+              <div className={`vf-creatine-today ${creatinaHoy ? "done" : ""}`}>
+                <span>{creatinaHoy ? "✓" : "💊"}</span>
+                <b>{creatinaHoy ? "CREATINA TOMADA HOY" : "CREATINA PENDIENTE HOY"}</b>
+              </div>
+              <p>{estadisticasCreatina.tomadosMes} tomas registradas · mejor racha {estadisticasCreatina.mejorRacha}</p>
+              {!creatinaHoy ? <button onClick={marcarCreatinaHoy}>✓ MARCAR CREATINA DE HOY</button> : <button onClick={()=>setVista("calendario")}>VER CALENDARIO</button>}
             </article>
           </section>
         </>}
@@ -2663,8 +2790,9 @@ linear-gradient(180deg,rgba(18,12,15,.97),rgba(11,12,15,.98));backdrop-filter:bl
               const hoy=claveFecha(new Date())===k;
               return <div key={k} className={`vf-cal-day ${entry?(entry.completado?"done":"planned"):""} ${hoy?"today":""}`} onClick={()=>planificarFecha(fecha)}>
                 <div className="vf-cal-num">{fecha.getDate()}</div>
-                {entry&&<><div className={`vf-cal-badge ${entry.completado?"vf-cal-done":""}`}>{entry.completado?"✅ COMPLETADO":"🏋️ PLANIFICADO"}<br/>{diaReal?`REAL: ${diaReal.subtitulo}`:(dia?.subtitulo??rut?.nombre??"Rutina")}</div><button className="vf-cal-open" onClick={e=>{e.stopPropagation();abrirEntrenoCalendario(entry)}}>▶ ENTRENAR</button><button className="vf-cal-open" onClick={e=>{e.stopPropagation();abrirEditorCalendario(fecha,entry)}}>✏️ EDITAR</button></>}
-                <button className={`vf-creatine-day ${creatina[k]?"taken":""}`} onClick={e=>{e.stopPropagation();toggleCreatinaFecha(fecha)}}>{creatina[k]?"💊 CREATINA ✓":"💊 CREATINA"}</button>
+                {entry?.completado&&<span className="vf-done-tick" title="Entrenamiento completado">✓</span>}
+                {entry&&<><div className={`vf-cal-badge ${entry.completado?"vf-cal-done":""}`}>{entry.completado?"COMPLETADO":"🏋️ PLANIFICADO"}<br/>{diaReal?`REAL: ${diaReal.subtitulo}`:(dia?.subtitulo??rut?.nombre??"Rutina")}</div><button className="vf-cal-open" onClick={e=>{e.stopPropagation();abrirEntrenoCalendario(entry)}}>▶ ENTRENAR</button><button className="vf-cal-open" onClick={e=>{e.stopPropagation();abrirEditorCalendario(fecha,entry)}}>✏️ EDITAR</button></>}
+                <button className={`vf-creatine-day ${creatina[k]?"taken":""}`} onClick={e=>{e.stopPropagation();toggleCreatinaFecha(fecha)}}>{creatina[k]?<><span className="vf-creatine-check">✓</span> CREATINA TOMADA</>:<>💊 CREATINA</>}</button>
               </div>;
             })}
           </div>
