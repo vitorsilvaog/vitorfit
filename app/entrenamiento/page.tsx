@@ -1362,10 +1362,25 @@ useEffect(() => {
     }
 
     if (modo === "musculo") {
-      return candidatos
+      const mismoMusculo = candidatos
         .filter((x) => x.musculo === ej.musculo)
-        .sort((a,b) => Number(b.patron === ej.patron) - Number(a.patron === ej.patron) || a.nombre.localeCompare(b.nombre))
-        .slice(0, 18);
+        .sort((a,b) => Number(b.patron === ej.patron) - Number(a.patron === ej.patron) || a.nombre.localeCompare(b.nombre));
+
+      // Único ajuste pedido: para Remo Cable 1 Mano, forzar el Jalón al Pecho
+      // Agarre Neutro como primera opción de MISMO MÚSCULO.
+      const esRemoCable1Mano =
+        ej.id === "d2-remo-unilateral" ||
+        ej.nombre === "Remo Cable 1 Mano" ||
+        actual === "Remo Cable 1 Mano";
+
+      if (esRemoCable1Mano) {
+        const preferida = biblioteca.find((x) => x.nombre === "Jalón al Pecho Agarre Neutro");
+        if (preferida) {
+          return [preferida, ...mismoMusculo.filter((x) => x.id !== preferida.id)].slice(0, 18);
+        }
+      }
+
+      return mismoMusculo.slice(0, 18);
     }
 
     // Modo inteligente: primero mismo músculo + mismo patrón, después mismo patrón,
@@ -2288,7 +2303,7 @@ linear-gradient(180deg,rgba(255,255,255,.012),transparent 24%),
 radial-gradient(circle at 50% -10%,rgba(255,48,74,.11),transparent 42%)}
 
 /* ===== SPLASH VITORFIT PRO ===== */
-.vf-splash{position:fixed;inset:0;z-index:9999;overflow:hidden;display:grid;place-items:center;background-color:#000;background-image:url("/vitorfit-splash-bg.png");background-repeat:no-repeat;background-position:center center;background-size:contain;opacity:1;transform:scale(1);transition:opacity .75s ease,transform .75s cubic-bezier(.2,.8,.2,1)}
+.vf-splash{position:fixed;inset:0;z-index:9999;overflow:hidden;display:grid;place-items:center;background-color:#000;background-image:url("/vitorfit-splash-bg.png?v=20260902-gym");background-repeat:no-repeat;background-position:center center;background-size:contain;opacity:1;transform:scale(1);transition:opacity .75s ease,transform .75s cubic-bezier(.2,.8,.2,1)}
 .vf-splash.leaving{opacity:0;transform:scale(1.018);pointer-events:none}
 .vf-splash-bg,.vf-splash-gym,.vf-splash-center{display:none!important}
 .vf-splash:before{content:"";position:absolute;inset:0;pointer-events:none;background:linear-gradient(90deg,rgba(0,0,0,.86),transparent 22%,transparent 78%,rgba(0,0,0,.86));z-index:1}
