@@ -7,6 +7,9 @@ import { useRouter } from "next/navigation";
 
 import { createClient } from "../../utils/supabase/client";
 
+// MODO PRUEBA: pon null cuando termines de probar para volver al descanso real.
+const PRUEBA_DESCANSO_SEGUNDOS: number | null = null;
+
 type Serie = { kg: string; reps: string; rir: string };
 
 type Registro = {
@@ -672,6 +675,7 @@ const keyAnatomiaOverrides = "vitorfit-anatomia-overrides-v1";
 const keyUsuarioActual = "vitorfit-usuario-actual";
 const keyDescansoFin = "vitorfit-descanso-fin-v1";
 const keySeriesConfirmadas = "vitorfit-series-confirmadas-v1";
+const keyExtrasSesion = "vitorfit-extras-sesion-v1";
 
 const uid = (prefix: string) => `${prefix}-${Date.now()}-${Math.random().toString(36).slice(2, 8)}`;
 const clone = <T,>(value: T): T => JSON.parse(JSON.stringify(value));
@@ -748,6 +752,8 @@ async function cerrarSesion() {
   const [filtroPatron, setFiltroPatron] = useState("Todos");
   const [filtroEquipo, setFiltroEquipo] = useState("Todos");
   const [targetBiblioteca, setTargetBiblioteca] = useState<{ rutinaId: string; diaId: string } | null>(null);
+  const [añadiendoSoloHoy, setAñadiendoSoloHoy] = useState(false);
+  const [extrasSesion, setExtrasSesion] = useState<RoutineExercise[]>([]);
   const [mostrarCrearEjercicio, setMostrarCrearEjercicio] = useState(false);
   const [nuevoEjercicio, setNuevoEjercicio] = useState({ nombre: "", musculo: "", patron: "", equipo: "Máquina", tipo: "Aislamiento" as "Compuesto" | "Aislamiento" });
 
@@ -766,6 +772,7 @@ const ultimoRegistroHistorial =
   const [segundos, setSegundos] = useState(0);
   const [entrenoPausado, setEntrenoPausado] = useState(false);
   const [descansoRestante, setDescansoRestante] = useState(0);
+  const [descansoTerminado, setDescansoTerminado] = useState(false);
   const [descansoFin, setDescansoFin] = useState<number | null>(null);
   const [descansoSerieActiva, setDescansoSerieActiva] = useState<{ ejId: string; serieIndex: number } | null>(null);
   const [seriesSesion, setSeriesSesion] = useState<Record<string, number>>({});
@@ -777,7 +784,7 @@ const ultimoRegistroHistorial =
   const [fechaEditCalendario, setFechaEditCalendario] = useState<string | null>(null);
   const [rutinaRealizadaId, setRutinaRealizadaId] = useState(DEFAULT_ROUTINES[0].id);
   const [diaRealizadoIndex, setDiaRealizadoIndex] = useState(0);
-  const [mesCalendario, setMesCalendario] = useState(() => { const d = new Date(); return new Date(d.getFullYear(), d.getMonth(), 1); });
+  const [mesCalendario, setMesCalendario] = useState(() => { const d = new Date(); return new Date(d.getFullYear(), d.getMonth(), 1, 12); });
   const [rutinaPlanId, setRutinaPlanId] = useState(DEFAULT_ROUTINES[0].id);
   const [diaPlanIndex, setDiaPlanIndex] = useState(0);
   const [creatina, setCreatina] = useState<CreatinaMap>({});
@@ -853,6 +860,7 @@ const ultimoRegistroHistorial =
   const biblioteca = useMemo(() => [...BUILTIN_LIBRARY, ...bibliotecaPersonal], [bibliotecaPersonal]);
   const rutinaActual = rutinas.find((r) => r.id === rutinaActualId) ?? rutinas[0] ?? DEFAULT_ROUTINES[0];
   const diaActual = rutinaActual?.dias?.[diaActualIndex] ?? rutinaActual?.dias?.[0];
+  const ejerciciosHoy = [...(diaActual?.ejercicios ?? []), ...extrasSesion];
 
   // Identifica al usuario y, si existe, carga su copia personal desde Supabase.
   useEffect(() => {
@@ -896,6 +904,7 @@ const ultimoRegistroHistorial =
         if (nube.calendario) setCalendario(nube.calendario);
         if (nube.creatina) setCreatina(nube.creatina);
         if (nube.anatomiaOverrides) setAnatomiaOverrides(nube.anatomiaOverrides);
+        if (nube.extrasSesion) setExtrasSesion(nube.extrasSesion);
       }
 
       setNubeLista(true);
@@ -970,7 +979,43 @@ const ultimoRegistroHistorial =
       setDescansoRestante(restante);
       if (restante <= 0) {
         setDescansoFin(null);
+        setDescansoTerminado(true);
+        setMensaje("🔔 ¡Descanso terminado! Ya puedes empezar la siguiente serie 💪");
         if (userId) localStorage.removeItem(keyUsuario(keyDescansoFin));
+
+        // Aviso del móvil/PWA cuando el navegador lo permite.
+        try {
+          if ("vibrate" in navigator) navigator.vibrate([250, 120, 250, 120, 400]);
+          if ("Notification" in window && Notification.permission === "granted") {
+            const opciones = {
+              body: "Ya puedes empezar la siguiente serie 💪",
+              icon: "/icon-192.png",
+              badge: "/icon-192.png",
+              tag: "vitorfit-descanso",
+              renotify: true,
+            } as NotificationOptions;
+
+            // En PWA/móvil es más fiable mostrarla desde el service worker.
+            if ("serviceWorker" in navigator) {
+              navigator.serviceWorker.ready
+                .then((registro) => registro.showNotification("VitorFit · Descanso terminado 🔔", opciones))
+                .catch(() => new Notification("VitorFit · Descanso terminado 🔔", opciones));
+            } else {
+              new Notification("VitorFit · Descanso terminado 🔔", opciones);
+            }
+          }
+          const AudioCtx = window.AudioContext || (window as any).webkitAudioContext;
+          if (AudioCtx) {
+            const ctx = new AudioCtx();
+            [0, 0.22, 0.44].forEach((delay) => {
+              const osc = ctx.createOscillator();
+              const gain = ctx.createGain();
+              osc.connect(gain); gain.connect(ctx.destination);
+              osc.frequency.value = 880; gain.gain.value = 0.08;
+              osc.start(ctx.currentTime + delay); osc.stop(ctx.currentTime + delay + 0.12);
+            });
+          }
+        } catch {}
       }
     };
 
@@ -1001,6 +1046,7 @@ const ultimoRegistroHistorial =
     const cr = localStorage.getItem(keyUsuario(keyCreatina));
     const ao = localStorage.getItem(keyUsuario(keyAnatomiaOverrides));
     const sc = localStorage.getItem(keyUsuario(keySeriesConfirmadas));
+    const exs = localStorage.getItem(keyUsuario(keyExtrasSesion));
 
     if (r) setRegistros(JSON.parse(r));
     if (h) setHistorial(JSON.parse(h));
@@ -1025,6 +1071,7 @@ const ultimoRegistroHistorial =
     if (cr) setCreatina(JSON.parse(cr));
     if (ao) setAnatomiaOverrides(JSON.parse(ao));
     if (sc) setSeriesConfirmadas(JSON.parse(sc));
+    if (exs) setExtrasSesion(JSON.parse(exs));
 
   } catch {
     setMensaje(
@@ -1086,6 +1133,17 @@ useEffect(() => {
 
 useEffect(() => {
   if (!userId) return;
+  localStorage.setItem(keyUsuario(keyExtrasSesion), JSON.stringify(extrasSesion));
+}, [userId, extrasSesion]);
+
+// Los ejercicios EXTRA pertenecen únicamente al día de entrenamiento actual.
+// Al cambiar de día o de rutina se eliminan de la sesión, sin tocar la rutina base.
+useEffect(() => {
+  setExtrasSesion([]);
+}, [rutinaActualId, diaActualIndex]);
+
+useEffect(() => {
+  if (!userId) return;
   localStorage.setItem(
     keyUsuario(keyAnatomiaOverrides),
     JSON.stringify(anatomiaOverrides)
@@ -1109,6 +1167,7 @@ useEffect(() => {
         calendario,
         creatina,
         anatomiaOverrides,
+        extrasSesion,
       };
 
       const { error } = await supabase
@@ -1126,7 +1185,7 @@ useEffect(() => {
     return () => window.clearTimeout(timer);
   }, [
     userId, nubeLista, registros, historial, variantes, ajustes, rutinas,
-    bibliotecaPersonal, rutinaActualId, diaActualIndex, calendario, creatina, anatomiaOverrides, supabase,
+    bibliotecaPersonal, rutinaActualId, diaActualIndex, calendario, creatina, anatomiaOverrides, extrasSesion, supabase,
   ]);
 
   const nombreVariante = (ej: RoutineExercise) => variantes[ej.id] || ej.nombre;
@@ -1185,7 +1244,7 @@ useEffect(() => {
 
     if (hechas < cantidad) {
       setDescansoSerieActiva({ ejId: ej.id, serieIndex });
-      iniciarDescanso(ej.descanso ?? ajustes.descanso);
+      iniciarDescanso(PRUEBA_DESCANSO_SEGUNDOS ?? ej.descanso ?? ajustes.descanso);
       setMensaje(`✅ Serie ${hechas} completada · descanso iniciado`);
     } else {
       setDescansoSerieActiva(null);
@@ -1290,7 +1349,24 @@ useEffect(() => {
     );
   };
 
+  const activarAvisosDescanso = async () => {
+    if (typeof window === "undefined" || !("Notification" in window)) {
+      setMensaje("⚠️ Este navegador no admite notificaciones de VitorFit.");
+      return;
+    }
+    const permiso = await Notification.requestPermission();
+    if (permiso === "granted") {
+      if ("serviceWorker" in navigator) {
+        try { await navigator.serviceWorker.ready; } catch {}
+      }
+      setMensaje("🔔 Avisos de descanso activados");
+    } else {
+      setMensaje("⚠️ Permiso de notificaciones no concedido");
+    }
+  };
+
   const iniciarDescanso = (duracion: number) => {
+    setDescansoTerminado(false);
     const fin = Date.now() + duracion * 1000;
     setDescansoFin(fin);
     setDescansoRestante(duracion);
@@ -1306,12 +1382,12 @@ useEffect(() => {
     return `${h}:${m}:${sec}`;
   };
 
-  const completados = (diaActual?.ejercicios ?? []).filter((ej) => {
+  const completados = ejerciciosHoy.filter((ej) => {
     const s = registros[ej.id] ?? [];
     const cantidad = cantidadSeriesSesion(ej);
     return (seriesConfirmadas[ej.id] ?? 0) >= cantidad && s.slice(0, cantidad).every((x) => x.kg && x.reps);
   }).length;
-  const seriesCompletadas = (diaActual?.ejercicios ?? []).reduce((acc, ej) => acc + (seriesConfirmadas[ej.id] ?? 0), 0);
+  const seriesCompletadas = ejerciciosHoy.reduce((acc, ej) => acc + (seriesConfirmadas[ej.id] ?? 0), 0);
   const kcal = Math.max(0, Math.round((segundos / 60) * 6.2));
 
   const progreso = useMemo(() => {
@@ -1691,6 +1767,15 @@ useEffect(() => {
   };
 
   const añadirDesdeBiblioteca = (lib: LibraryExercise) => {
+    if (añadiendoSoloHoy) {
+      const ex: RoutineExercise = { id: `extra-${lib.id}`, libraryId: lib.id, nombre: lib.nombre, musculo: lib.musculo, patron: lib.patron, equipo: lib.equipo, series: 3, reps: "8-12", rir: "1-2", icono: lib.icono };
+      setExtrasSesion((prev) => prev.some((e) => e.id === ex.id) ? prev : [...prev, ex]);
+      setAñadiendoSoloHoy(false);
+      setTargetBiblioteca(null);
+      setVista("entreno");
+      setMensaje(`➕ ${lib.nombre} añadido SOLO al entrenamiento de hoy. Tu rutina no cambia.`);
+      return;
+    }
     if (!targetBiblioteca) { setMensaje("Primero elige una rutina y un día."); return; }
     const ex: RoutineExercise = { id: uid("rex"), libraryId: lib.id, nombre: lib.nombre, musculo: lib.musculo, patron: lib.patron, equipo: lib.equipo, series: 3, reps: "8-12", rir: "1-2", icono: lib.icono };
     actualizarRutina(targetBiblioteca.rutinaId, (r) => ({ ...r, dias: r.dias.map((d) => d.id === targetBiblioteca.diaId ? { ...d, ejercicios: [...d.ejercicios, ex] } : d) }));
@@ -1857,11 +1942,11 @@ const planificarFecha = (fecha: Date) => {
 
   const diasDelMes = useMemo(() => {
     const y = mesCalendario.getFullYear(), m = mesCalendario.getMonth();
-    const primero = new Date(y, m, 1);
-    const ultimo = new Date(y, m + 1, 0);
+    const primero = new Date(y, m, 1, 12);
+    const ultimo = new Date(y, m + 1, 0, 12);
     const offsetLunes = (primero.getDay() + 6) % 7;
     const celdas: Array<Date | null> = Array.from({ length: offsetLunes }, () => null);
-    for (let d = 1; d <= ultimo.getDate(); d++) celdas.push(new Date(y, m, d));
+    for (let d = 1; d <= ultimo.getDate(); d++) celdas.push(new Date(y, m, d, 12));
     while (celdas.length % 7 !== 0) celdas.push(null);
     return celdas;
   }, [mesCalendario]);
@@ -2568,16 +2653,21 @@ linear-gradient(180deg,rgba(18,12,15,.97),rgba(11,12,15,.98));backdrop-filter:bl
 
         {vista === "entreno" && diaActual && <>
           <section className="vf-stats">
-            <div className="vf-stat"><div className="vf-ring" style={{ ["--progress" as string]: Math.round((completados / Math.max(1, diaActual.ejercicios.length)) * 100) }}><div className="vf-ring-text">{completados}/{diaActual.ejercicios.length}</div></div><div className="vf-stat-label">EJERCICIOS</div><div className="vf-stat-sub">completados</div></div>
+            <div className="vf-stat"><div className="vf-ring" style={{ ["--progress" as string]: Math.round((completados / Math.max(1, ejerciciosHoy.length)) * 100) }}><div className="vf-ring-text">{completados}/{ejerciciosHoy.length}</div></div><div className="vf-stat-label">EJERCICIOS</div><div className="vf-stat-sub">completados</div></div>
             <div className="vf-stat"><div className="vf-stat-icon">🕘</div><div className="vf-stat-value">{formatoTiempo(segundos)}</div><div className="vf-stat-label">DURACIÓN</div><div className="vf-stat-sub">{entrenoPausado ? "PAUSADO" : "del entrenamiento"}</div><button className={`vf-pause ${entrenoPausado?"paused":""}`} onClick={togglePausaEntreno}>{entrenoPausado?"▶ REANUDAR":"⏸ PAUSAR"}</button></div>
             <div className="vf-stat"><div className="vf-stat-icon">🔥</div><div className="vf-stat-value">{kcal}</div><div className="vf-stat-label">KCAL</div><div className="vf-stat-sub">estimadas</div></div>
             <div className="vf-stat"><div className="vf-stat-icon">🏆</div><div className="vf-stat-value" style={{fontSize:20}}>¡TÚ PUEDES!</div><div className="vf-stat-sub">Cada repetición te acerca a tu mejor versión</div><div className="vf-stat-sub" style={{marginTop:8,color:"#D94B55"}}>{seriesCompletadas} series hechas</div></div>
           </section>
 
-          {diaActual.ejercicios.map((ej,index)=>{
+          <section className="vf-section-card" style={{display:"flex",gap:10,alignItems:"center",justifyContent:"space-between",flexWrap:"wrap"}}><div><strong>🔔 Avisos de descanso en el móvil</strong><div className="vf-muted">Actívalos una vez para recibir una alerta cuando el contador llegue a cero.{PRUEBA_DESCANSO_SEGUNDOS ? ` · MODO PRUEBA: ${PRUEBA_DESCANSO_SEGUNDOS}s` : ""}</div></div><button className="vf-secondary" onClick={activarAvisosDescanso}>🔔 ACTIVAR AVISOS</button></section>
+          {descansoTerminado&&<section className="vf-section-card" style={{border:"2px solid #D94B55",textAlign:"center"}}><div style={{fontSize:28,fontWeight:900}}>🔔 ¡DESCANSO TERMINADO!</div><div className="vf-muted" style={{marginTop:6}}>Ya puedes empezar la siguiente serie 💪</div><button className="vf-primary" style={{marginTop:12}} onClick={()=>setDescansoTerminado(false)}>✓ ENTENDIDO</button></section>}
+
+          <section className="vf-section-card" style={{display:"flex",gap:10,alignItems:"center",justifyContent:"space-between",flexWrap:"wrap"}}><div><strong>➕ ¿Quieres hacer un ejercicio extra hoy?</strong><div className="vf-muted">Se guardará en tu historial, pero NO modificará tu rutina base.</div></div><button className="vf-primary" onClick={()=>{setAñadiendoSoloHoy(true);setTargetBiblioteca(null);setVista("biblioteca")}}>＋ AÑADIR SOLO HOY</button></section>
+
+          {ejerciciosHoy.map((ej,index)=>{
             const cantidadSeries=cantidadSeriesSesion(ej), confirmadas=seriesConfirmadas[ej.id]??0, anterior=ultimoRegistro(ej), actuales=registros[ej.id]??seriesVacias(cantidadSeries), varianteActual=nombreVariante(ej), alternativas=alternativasPara(ej);
             return <section className="vf-card" key={ej.id}>
-              <div className="vf-card-head"><div className="vf-num">{String(index+1).padStart(2,"0")}</div><div><div className="vf-title-row"><div className="vf-ex-title">{varianteActual}</div><span className="vf-tag">{ej.musculo}</span></div><div className="vf-prescription">🎯 {cantidadSeries} series · {ej.reps} reps · RIR {ej.rir} · {ej.equipo}</div><div className="vf-session-series"><button onClick={()=>cambiarSeriesSesion(ej,-1)} disabled={cantidadSeries<=Math.max(1,confirmadas)}>−</button><strong>{cantidadSeries} SERIES HOY</strong><button onClick={()=>cambiarSeriesSesion(ej,1)} disabled={cantidadSeries>=10}>+</button></div></div><AnatomiaPro id={ej.id} musculo={ej.musculo} patron={ej.patron} nombre={ej.nombre} /></div>
+              <div className="vf-card-head"><div className="vf-num">{String(index+1).padStart(2,"0")}</div><div><div className="vf-title-row"><div className="vf-ex-title">{varianteActual}</div><span className="vf-tag">{ej.musculo}</span></div><div className="vf-prescription">🎯 {cantidadSeries} series · {ej.reps} reps · RIR {ej.rir} · {ej.equipo} {ej.id.startsWith("extra-")&&<span className="vf-tag"> · EXTRA SOLO HOY</span>}</div>{ej.id.startsWith("extra-")&&<button className="vf-secondary" onClick={()=>setExtrasSesion(p=>p.filter(x=>x.id!==ej.id))}>✕ QUITAR EXTRA</button>}<div className="vf-session-series"><button onClick={()=>cambiarSeriesSesion(ej,-1)} disabled={cantidadSeries<=Math.max(1,confirmadas)}>−</button><strong>{cantidadSeries} SERIES HOY</strong><button onClick={()=>cambiarSeriesSesion(ej,1)} disabled={cantidadSeries>=10}>+</button></div></div><AnatomiaPro id={ej.id} musculo={ej.musculo} patron={ej.patron} nombre={ej.nombre} /></div>
               <div className="vf-alt-wrap">
                 <button className="vf-alt-button" onClick={()=>setAlternativasAbiertas(p=>({...p,[ej.id]:!p[ej.id]}))}>🔄 ¿Está ocupado o no puedes hacerlo? ALTERNAR</button>
                 {alternativasAbiertas[ej.id]&&<><div className="vf-alt-tools"><button className={(modoAlternativa[ej.id]??"inteligente")==="inteligente"?"active":""} onClick={()=>setModoAlternativa(p=>({...p,[ej.id]:"inteligente"}))}>✨ MEJOR ALTERNATIVA</button><button className={modoAlternativa[ej.id]==="patron"?"active":""} onClick={()=>setModoAlternativa(p=>({...p,[ej.id]:"patron"}))}>🎯 MISMO PATRÓN</button><button className={modoAlternativa[ej.id]==="musculo"?"active":""} onClick={()=>setModoAlternativa(p=>({...p,[ej.id]:"musculo"}))}>💪 MISMO MÚSCULO</button></div><div className="vf-alt-list">{alternativas.map(alt=><button key={alt.id} className={`vf-alt-option ${varianteActual===alt.nombre?"active":""}`} onClick={()=>{setVariantes(p=>({...p,[ej.id]:alt.nombre}));setAlternativasAbiertas(p=>({...p,[ej.id]:false}));setMensaje(`🔄 Cambiado a ${alt.nombre}. Series, reps y RIR se mantienen.`)}}><strong>{alt.nombre}</strong><br/><span className="vf-muted">{alt.equipo} · {alt.patron}</span></button>)}</div></>}
@@ -2589,7 +2679,7 @@ linear-gradient(180deg,rgba(18,12,15,.97),rgba(11,12,15,.98));backdrop-filter:bl
               <div className="vf-card-actions"><button className="vf-save" disabled={confirmadas<cantidadSeries} onClick={()=>guardarEjercicio(ej)}>💾 GUARDAR EJERCICIO</button><div className="vf-rest vf-rest-status">{descansoSerieActiva?.ejId===ej.id&&descansoRestante>0?`⏱️ DESCANSO ${descansoRestante}s`:confirmadas>=cantidadSeries?"✅ LISTO PARA GUARDAR":"DESCANSO AUTOMÁTICO"}</div></div>
             </section>
           })}
-          {!diaActual.ejercicios.length&&<section className="vf-section-card">Este día todavía no tiene ejercicios. Ve a <strong>RUTINAS</strong> para añadirlos desde la biblioteca.</section>}
+          {!ejerciciosHoy.length&&<section className="vf-section-card">Este día todavía no tiene ejercicios. Ve a <strong>RUTINAS</strong> para añadirlos desde la biblioteca.</section>}
           <a className="vf-home" href="/">← Volver al inicio</a>
         </>}
 
@@ -2626,7 +2716,7 @@ linear-gradient(180deg,rgba(18,12,15,.97),rgba(11,12,15,.98));backdrop-filter:bl
             <div className="vf-generator-note">VitorFit selecciona ejercicios de tu Biblioteca y ajusta series, repeticiones, RIR y descansos según el objetivo, nivel y tiempo disponibles. Después puedes editar la rutina normalmente.</div>
             <div className="vf-toolbar" style={{marginBottom:0,marginTop:12}}><button className="vf-primary" onClick={generarRutinaObjetivos}>✨ GENERAR MI RUTINA</button></div>
           </section>}<div className="vf-routines">{rutinas.map(r=><div className="vf-routine-day" key={r.id}><h3>{r.nombre}</h3><div className="vf-muted">{r.descripcion} · {r.dias.length} días</div><ul className="vf-routine-list">{r.dias.map(d=><li key={d.id}><strong>{d.titulo}</strong> · {d.subtitulo}<br/><span className="vf-muted">{d.ejercicios.length} ejercicios</span></li>)}</ul><div className="vf-toolbar" style={{marginTop:12,marginBottom:0}}><button className="vf-primary" onClick={()=>{setRutinaActualId(r.id);setDiaActualIndex(0);setVista("entreno")}}>▶ USAR</button><button className="vf-secondary" onClick={()=>{setEditorRutinaId(r.id);setEditorDiaId(r.dias[0]?.id??null)}}>✏️ EDITAR</button><button className="vf-secondary" onClick={()=>duplicarRutina(r)}>⧉ DUPLICAR</button><button className="vf-secondary" onClick={()=>compartirRutina(r)}>📤 COMPARTIR</button><button className="vf-danger" onClick={()=>eliminarRutina(r.id)}>🗑️</button></div></div>)}</div>
-          {editorRutina&&<section className="vf-editor"><h2 style={{color:"#D94B55",marginTop:0}}>✏️ EDITAR RUTINA</h2><div className="vf-editor-head"><input className="vf-text" value={editorRutina.nombre} onChange={e=>actualizarRutina(editorRutina.id,r=>({...r,nombre:e.target.value}))}/><input className="vf-text" value={editorRutina.descripcion} onChange={e=>actualizarRutina(editorRutina.id,r=>({...r,descripcion:e.target.value}))}/></div><div className="vf-day-tabs">{editorRutina.dias.map(d=><button className={`vf-day-tab ${editorDia?.id===d.id?"active":""}`} key={d.id} onClick={()=>setEditorDiaId(d.id)}>{d.titulo}</button>)}<button className="vf-primary" onClick={()=>crearDia(editorRutina.id)}>＋ DÍA</button></div>{editorDia&&<><div className="vf-editor-head"><input className="vf-text" value={editorDia.titulo} onChange={e=>actualizarDia(editorRutina.id,editorDia.id,{titulo:e.target.value})}/><input className="vf-text" value={editorDia.subtitulo} onChange={e=>actualizarDia(editorRutina.id,editorDia.id,{subtitulo:e.target.value})}/></div><div className="vf-toolbar" style={{marginTop:12}}><button className="vf-primary" onClick={()=>{setTargetBiblioteca({rutinaId:editorRutina.id,diaId:editorDia.id});setVista("biblioteca")}}>＋ AÑADIR EJERCICIO</button><button className="vf-danger" onClick={()=>eliminarDia(editorRutina.id,editorDia.id)}>🗑️ ELIMINAR DÍA</button></div>{editorDia.ejercicios.map((ex,i)=><div className="vf-edit-ex" key={ex.id}><strong>{i+1}</strong><div><strong>{ex.nombre}</strong><div className="vf-muted">{ex.musculo} · {ex.patron}</div></div><input className="vf-text" type="number" min={1} value={ex.series} onChange={e=>actualizarEjercicioRutina(editorRutina.id,editorDia.id,ex.id,{series:Math.max(1,Number(e.target.value)||1)})}/><input className="vf-text" value={ex.reps} onChange={e=>actualizarEjercicioRutina(editorRutina.id,editorDia.id,ex.id,{reps:e.target.value})}/><input className="vf-text" value={ex.rir} onChange={e=>actualizarEjercicioRutina(editorRutina.id,editorDia.id,ex.id,{rir:e.target.value})}/><div className="vf-edit-controls"><button onClick={()=>moverEjercicio(editorRutina.id,editorDia.id,i,-1)}>↑</button><button onClick={()=>moverEjercicio(editorRutina.id,editorDia.id,i,1)}>↓</button><button onClick={()=>eliminarEjercicioRutina(editorRutina.id,editorDia.id,ex.id)}>🗑️</button></div></div>)}{!editorDia.ejercicios.length&&<div className="vf-muted" style={{padding:"18px 0"}}>Este día está vacío. Pulsa “Añadir ejercicio”.</div>}</>}</section>}
+          {editorRutina&&<section className="vf-editor"><h2 style={{color:"#D94B55",marginTop:0}}>✏️ EDITAR RUTINA</h2><div className="vf-editor-head"><input className="vf-text" value={editorRutina.nombre} onChange={e=>actualizarRutina(editorRutina.id,r=>({...r,nombre:e.target.value}))}/><input className="vf-text" value={editorRutina.descripcion} onChange={e=>actualizarRutina(editorRutina.id,r=>({...r,descripcion:e.target.value}))}/></div><div className="vf-day-tabs">{editorRutina.dias.map(d=><button className={`vf-day-tab ${editorDia?.id===d.id?"active":""}`} key={d.id} onClick={()=>setEditorDiaId(d.id)}>{d.titulo}</button>)}<button className="vf-primary" onClick={()=>crearDia(editorRutina.id)}>＋ DÍA</button></div>{editorDia&&<><div className="vf-editor-head"><input className="vf-text" value={editorDia.titulo} onChange={e=>actualizarDia(editorRutina.id,editorDia.id,{titulo:e.target.value})}/><input className="vf-text" value={editorDia.subtitulo} onChange={e=>actualizarDia(editorRutina.id,editorDia.id,{subtitulo:e.target.value})}/></div><div className="vf-toolbar" style={{marginTop:12}}><button className="vf-primary" onClick={()=>{setAñadiendoSoloHoy(false);setTargetBiblioteca({rutinaId:editorRutina.id,diaId:editorDia.id});setVista("biblioteca")}}>＋ AÑADIR EJERCICIO</button><button className="vf-danger" onClick={()=>eliminarDia(editorRutina.id,editorDia.id)}>🗑️ ELIMINAR DÍA</button></div>{editorDia.ejercicios.map((ex,i)=><div className="vf-edit-ex" key={ex.id}><strong>{i+1}</strong><div><strong>{ex.nombre}</strong><div className="vf-muted">{ex.musculo} · {ex.patron}</div></div><input className="vf-text" type="number" min={1} value={ex.series} onChange={e=>actualizarEjercicioRutina(editorRutina.id,editorDia.id,ex.id,{series:Math.max(1,Number(e.target.value)||1)})}/><input className="vf-text" value={ex.reps} onChange={e=>actualizarEjercicioRutina(editorRutina.id,editorDia.id,ex.id,{reps:e.target.value})}/><input className="vf-text" value={ex.rir} onChange={e=>actualizarEjercicioRutina(editorRutina.id,editorDia.id,ex.id,{rir:e.target.value})}/><div className="vf-edit-controls"><button onClick={()=>moverEjercicio(editorRutina.id,editorDia.id,i,-1)}>↑</button><button onClick={()=>moverEjercicio(editorRutina.id,editorDia.id,i,1)}>↓</button><button onClick={()=>eliminarEjercicioRutina(editorRutina.id,editorDia.id,ex.id)}>🗑️</button></div></div>)}{!editorDia.ejercicios.length&&<div className="vf-muted" style={{padding:"18px 0"}}>Este día está vacío. Pulsa “Añadir ejercicio”.</div>}</>}</section>}
         </>}
 
         {vista==="biblioteca"&&<><h1 className="vf-page-title">📚 BIBLIOTECA DE EJERCICIOS</h1><p className="vf-lib-count">{biblioteca.length} ejercicios disponibles · {resultadosBiblioteca.length} visibles</p>{targetBiblioteca&&<div className="vf-section-card" style={{borderColor:"#D94B55"}}>➕ Estás añadiendo ejercicios a una rutina. Pulsa <strong>AÑADIR</strong> en todos los que quieras y después vuelve a RUTINAS.</div>}<div className="vf-library-head"><input className="vf-text" placeholder="🔎 Buscar ejercicio, músculo, patrón..." value={busquedaBiblioteca} onChange={e=>setBusquedaBiblioteca(e.target.value)}/><select className="vf-text" value={filtroMusculo} onChange={e=>setFiltroMusculo(e.target.value)}>{musculos.map(x=><option key={x}>{x}</option>)}</select><select className="vf-text" value={filtroPatron} onChange={e=>setFiltroPatron(e.target.value)}>{patrones.map(x=><option key={x}>{x}</option>)}</select><select className="vf-text" value={filtroEquipo} onChange={e=>setFiltroEquipo(e.target.value)}>{equipos.map(x=><option key={x}>{x}</option>)}</select></div><div className="vf-toolbar"><button className="vf-primary" onClick={()=>setMostrarCrearEjercicio(!mostrarCrearEjercicio)}>⭐ CREAR EJERCICIO PERSONALIZADO</button>{targetBiblioteca&&<button className="vf-secondary" onClick={()=>setVista("rutinas")}>← VOLVER AL EDITOR</button>}</div>{mostrarCrearEjercicio&&<div className="vf-section-card"><strong>⭐ Nuevo ejercicio personalizado</strong><div className="vf-custom-form"><input className="vf-text" placeholder="Nombre" value={nuevoEjercicio.nombre} onChange={e=>setNuevoEjercicio(n=>({...n,nombre:e.target.value}))}/><input className="vf-text" placeholder="Músculo" value={nuevoEjercicio.musculo} onChange={e=>setNuevoEjercicio(n=>({...n,musculo:e.target.value}))}/><input className="vf-text" placeholder="Patrón" value={nuevoEjercicio.patron} onChange={e=>setNuevoEjercicio(n=>({...n,patron:e.target.value}))}/><input className="vf-text" placeholder="Equipo" value={nuevoEjercicio.equipo} onChange={e=>setNuevoEjercicio(n=>({...n,equipo:e.target.value}))}/><select className="vf-text" value={nuevoEjercicio.tipo} onChange={e=>setNuevoEjercicio(n=>({...n,tipo:e.target.value as "Compuesto"|"Aislamiento"}))}><option>Compuesto</option><option>Aislamiento</option></select></div><button className="vf-primary" onClick={crearEjercicioPersonal}>GUARDAR EN BIBLIOTECA</button></div>}<div className="vf-library-grid">{resultadosBiblioteca.map(ex=><div className="vf-lib-card" key={ex.id}><div className="vf-lib-top"><div><h3>{ex.nombre}</h3><div className="vf-lib-muscle">{ex.musculo}</div></div><AnatomiaPro id={ex.id} musculo={ex.musculo} patron={ex.patron} nombre={ex.nombre} compact /></div><div className="vf-lib-meta">💪 {ex.musculo}<br/>🎯 {ex.patron}<br/>⚙️ {ex.equipo} · {ex.tipo}</div>
