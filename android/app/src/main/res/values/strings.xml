@@ -1,0 +1,7 @@
+<?xml version='1.0' encoding='utf-8'?>
+<resources>
+    <string name="app_name">VitorFit</string>
+    <string name="title_activity_main">VitorFit</string>
+    <string name="package_name">com.vitorfit.app</string>
+    <string name="custom_url_scheme">com.vitorfit.app</string>
+</resources>
