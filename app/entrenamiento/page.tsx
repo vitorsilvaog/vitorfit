@@ -553,10 +553,57 @@ const reglaValida = (e: LibraryExercise, reglaId: string) => {
   return true;
 };
 
+
+// Vídeos Fit3D SOLO cuando la equivalencia es suficientemente clara.
+// Importante: NO asignamos un vídeo solo por compartir el mismo patrón,
+// porque eso provocaba errores como "Press Pecho Polea" mostrando press banca con barra.
+// Los vídeos subidos manualmente por ti siempre tienen prioridad.
+const FIT3D_VIDEO_BY_ID: Map<number, string> = new Map(
+  FIT3D_EXERCISES.map((e) => [Number(e.fit3d_id), e.demo_url] as [number, string])
+);
+
+const DEMO_FIT3D_POR_EJERCICIO: Record<string, number> = {
+  // PECHO - inclinados
+  "Press Inclinado Multipower": 461,
+  "Press Inclinado Máquina": 450,
+  "Press Inclinado Polea": 422,
+
+  // PECHO - horizontales
+  "Press Plano Mancuernas": 434,
+  "Press Plano Multipower": 460,
+  "Press Pecho Polea": 403,
+  "Flexiones": 456,
+
+  // PECHO - declinados
+  "Press Declinado Barra": 389,
+  "Press Declinado Mancuernas": 436,
+  "Press Declinado Multipower": 459,
+  "Press Declinado Máquina": 449,
+  "Fondos Pecho": 415,
+  "Fondos Pecho Asistidos": 413,
+
+  // PECHO - aperturas / cruces
+  "Cruce de Poleas Medio": 404,
+  "Cruce de Poleas Bajo a Alto": 409,
+  "Pec Deck": 453,
+
+  // Otros emparejamientos claros
+  "Encogimientos Barra": 485,
+  "Elevaciones Laterales Mancuernas": 543,
+};
+
+const BASE_LIBRARY_CON_VIDEOS: LibraryExercise[] = BASE_LIBRARY.map((e) => {
+  const fit3dId = DEMO_FIT3D_POR_EJERCICIO[e.nombre];
+  return {
+    ...e,
+    demo_url: e.demo_url ?? (fit3dId ? FIT3D_VIDEO_BY_ID.get(fit3dId) : undefined),
+  };
+});
+
 const BUILTIN_LIBRARY: LibraryExercise[] = (() => {
   // Conservamos los ejercicios base de tus rutinas actuales y añadimos
   // los 853 ejercicios reales de Fit3D. Ya no generamos variantes artificiales.
-  const salida: LibraryExercise[] = [...BASE_LIBRARY];
+  const salida: LibraryExercise[] = [...BASE_LIBRARY_CON_VIDEOS];
   const usados = new Set(salida.map((e) => e.nombre.toLowerCase()));
 
   for (const fit of FIT3D_EXERCISES) {
@@ -741,9 +788,7 @@ async function cerrarSesion() {
   const [filtroMusculo, setFiltroMusculo] = useState("Todos");
   const [filtroPatron, setFiltroPatron] = useState("Todos");
   const [filtroEquipo, setFiltroEquipo] = useState("Todos");
-  const [paginaBiblioteca, setPaginaBiblioteca] = useState(1);
   const [demosAbiertas, setDemosAbiertas] = useState<Record<string, boolean>>({});
-  const EJERCICIOS_POR_PAGINA = 30;
   const [targetBiblioteca, setTargetBiblioteca] = useState<{ rutinaId: string; diaId: string } | null>(null);
   const [añadiendoSoloHoy, setAñadiendoSoloHoy] = useState(false);
   const [extrasSesion, setExtrasSesion] = useState<RoutineExercise[]>([]);
@@ -1418,20 +1463,7 @@ useEffect(() => {
     });
   }, [biblioteca, busquedaBiblioteca, filtroMusculo, filtroPatron, filtroEquipo]);
 
-  const totalPaginasBiblioteca = Math.max(1, Math.ceil(resultadosBiblioteca.length / EJERCICIOS_POR_PAGINA));
-  const resultadosBibliotecaPagina = useMemo(() => {
-    const inicio = (paginaBiblioteca - 1) * EJERCICIOS_POR_PAGINA;
-    return resultadosBiblioteca.slice(inicio, inicio + EJERCICIOS_POR_PAGINA);
-  }, [resultadosBiblioteca, paginaBiblioteca]);
 
-  useEffect(() => {
-    setPaginaBiblioteca(1);
-    setDemosAbiertas({});
-  }, [busquedaBiblioteca, filtroMusculo, filtroPatron, filtroEquipo]);
-
-  useEffect(() => {
-    if (paginaBiblioteca > totalPaginasBiblioteca) setPaginaBiblioteca(totalPaginasBiblioteca);
-  }, [paginaBiblioteca, totalPaginasBiblioteca]);
 
   const alternativasPara = (ej: RoutineExercise) => {
     const modo = modoAlternativa[ej.id] ?? "inteligente";
@@ -2729,7 +2761,7 @@ linear-gradient(180deg,rgba(18,12,15,.97),rgba(11,12,15,.98));backdrop-filter:bl
 
         {vista==="biblioteca"&&<>
           <h1 className="vf-page-title">📚 BIBLIOTECA DE EJERCICIOS</h1>
-          <p className="vf-lib-count">{biblioteca.length} ejercicios disponibles · {resultadosBiblioteca.length} encontrados · página {paginaBiblioteca} de {totalPaginasBiblioteca}</p>
+          <p className="vf-lib-count">{biblioteca.length} ejercicios disponibles · {resultadosBiblioteca.length} visibles</p>
 
           {targetBiblioteca&&<div className="vf-section-card" style={{borderColor:"#D94B55"}}>➕ Estás añadiendo ejercicios a una rutina. Pulsa <strong>AÑADIR</strong> en todos los que quieras y después vuelve a RUTINAS.</div>}
 
@@ -2758,7 +2790,7 @@ linear-gradient(180deg,rgba(18,12,15,.97),rgba(11,12,15,.98));backdrop-filter:bl
           </div>}
 
           <div className="vf-library-grid">
-            {resultadosBibliotecaPagina.map(ex=><div className="vf-lib-card" key={ex.id}>
+            {resultadosBiblioteca.map(ex=><div className="vf-lib-card" key={ex.id}>
               <div className="vf-lib-top">
                 <div><h3>{ex.nombre}</h3><div className="vf-lib-muscle">{ex.musculo}</div></div>
                 <AnatomiaPro id={ex.id} musculo={ex.musculo} patron={ex.patron} nombre={ex.nombre} compact />
@@ -2793,11 +2825,6 @@ linear-gradient(180deg,rgba(18,12,15,.97),rgba(11,12,15,.98));backdrop-filter:bl
             </div>)}
           </div>
 
-          {!!resultadosBiblioteca.length&&<div className="vf-toolbar" style={{justifyContent:"center",marginTop:18}}>
-            <button className="vf-secondary" disabled={paginaBiblioteca<=1} onClick={()=>{setPaginaBiblioteca(p=>Math.max(1,p-1));setDemosAbiertas({});window.scrollTo({top:0,behavior:"smooth"});}}>← ANTERIOR</button>
-            <span className="vf-muted" style={{alignSelf:"center",fontWeight:800}}>Página {paginaBiblioteca} de {totalPaginasBiblioteca}</span>
-            <button className="vf-primary" disabled={paginaBiblioteca>=totalPaginasBiblioteca} onClick={()=>{setPaginaBiblioteca(p=>Math.min(totalPaginasBiblioteca,p+1));setDemosAbiertas({});window.scrollTo({top:0,behavior:"smooth"});}}>SIGUIENTE →</button>
-          </div>}
 
           {!resultadosBiblioteca.length&&<div className="vf-section-card">No encontré ejercicios con esos filtros.</div>}
         </>}
