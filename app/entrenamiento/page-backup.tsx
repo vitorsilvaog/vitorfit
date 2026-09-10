@@ -2,7 +2,6 @@
 
 import { useEffect, useMemo, useState } from "react";
 import { useRouter } from "next/navigation";
-import { FIT3D_EXERCISES } from "./fit3d-exercises";
 
 
 
@@ -30,7 +29,6 @@ type LibraryExercise = {
   tipo: "Compuesto" | "Aislamiento";
   icono: string;
   demo_url?: string;
-  image_url?: string;
 };
 
 type RoutineExercise = {
@@ -554,28 +552,40 @@ const reglaValida = (e: LibraryExercise, reglaId: string) => {
 };
 
 const BUILTIN_LIBRARY: LibraryExercise[] = (() => {
-  // Conservamos los ejercicios base de tus rutinas actuales y añadimos
-  // los 853 ejercicios reales de Fit3D. Ya no generamos variantes artificiales.
   const salida: LibraryExercise[] = [...BASE_LIBRARY];
   const usados = new Set(salida.map((e) => e.nombre.toLowerCase()));
 
-  for (const fit of FIT3D_EXERCISES) {
-    if (usados.has(fit.nombre.toLowerCase())) continue;
-    usados.add(fit.nombre.toLowerCase());
-    salida.push({
-      id: fit.id,
-      nombre: fit.nombre,
-      musculo: fit.musculo,
-      patron: fit.patron,
-      equipo: fit.equipo,
-      tipo: fit.tipo,
-      icono: fit.icono,
-      demo_url: fit.demo_url,
-      image_url: fit.image_url,
-    });
+  for (const regla of REGLAS_VARIANTES) {
+    for (const base of BASE_LIBRARY) {
+      if (salida.length >= 1000) break;
+      if (!reglaValida(base, regla.id)) continue;
+      const nombre = `${base.nombre}${regla.sufijo}`;
+      if (usados.has(nombre.toLowerCase())) continue;
+      usados.add(nombre.toLowerCase());
+      salida.push({
+        ...base,
+        id: `${base.id}-${regla.id}`,
+        nombre,
+      });
+    }
+    if (salida.length >= 1000) break;
   }
 
-  return salida;
+  // Si alguna familia tuviera pocas variantes aplicables, completamos con
+  // variantes técnicas seguras manteniendo exactamente el mismo patrón.
+  let vuelta = 1;
+  while (salida.length < 1000) {
+    for (const base of BASE_LIBRARY) {
+      if (salida.length >= 1000) break;
+      const nombre = `${base.nombre} · Variante técnica ${vuelta}`;
+      if (usados.has(nombre.toLowerCase())) continue;
+      usados.add(nombre.toLowerCase());
+      salida.push({ ...base, id: `${base.id}-tecnica-${vuelta}`, nombre });
+    }
+    vuelta += 1;
+  }
+
+  return salida.slice(0, 1000);
 })();
 
 const libByName = (nombre: string) => BUILTIN_LIBRARY.find((e) => e.nombre === nombre) ?? BUILTIN_LIBRARY[0];
@@ -741,9 +751,6 @@ async function cerrarSesion() {
   const [filtroMusculo, setFiltroMusculo] = useState("Todos");
   const [filtroPatron, setFiltroPatron] = useState("Todos");
   const [filtroEquipo, setFiltroEquipo] = useState("Todos");
-  const [paginaBiblioteca, setPaginaBiblioteca] = useState(1);
-  const [demosAbiertas, setDemosAbiertas] = useState<Record<string, boolean>>({});
-  const EJERCICIOS_POR_PAGINA = 30;
   const [targetBiblioteca, setTargetBiblioteca] = useState<{ rutinaId: string; diaId: string } | null>(null);
   const [añadiendoSoloHoy, setAñadiendoSoloHoy] = useState(false);
   const [extrasSesion, setExtrasSesion] = useState<RoutineExercise[]>([]);
@@ -1417,21 +1424,6 @@ useEffect(() => {
       return okQ && (filtroMusculo === "Todos" || e.musculo === filtroMusculo) && (filtroPatron === "Todos" || e.patron === filtroPatron) && (filtroEquipo === "Todos" || e.equipo === filtroEquipo);
     });
   }, [biblioteca, busquedaBiblioteca, filtroMusculo, filtroPatron, filtroEquipo]);
-
-  const totalPaginasBiblioteca = Math.max(1, Math.ceil(resultadosBiblioteca.length / EJERCICIOS_POR_PAGINA));
-  const resultadosBibliotecaPagina = useMemo(() => {
-    const inicio = (paginaBiblioteca - 1) * EJERCICIOS_POR_PAGINA;
-    return resultadosBiblioteca.slice(inicio, inicio + EJERCICIOS_POR_PAGINA);
-  }, [resultadosBiblioteca, paginaBiblioteca]);
-
-  useEffect(() => {
-    setPaginaBiblioteca(1);
-    setDemosAbiertas({});
-  }, [busquedaBiblioteca, filtroMusculo, filtroPatron, filtroEquipo]);
-
-  useEffect(() => {
-    if (paginaBiblioteca > totalPaginasBiblioteca) setPaginaBiblioteca(totalPaginasBiblioteca);
-  }, [paginaBiblioteca, totalPaginasBiblioteca]);
 
   const alternativasPara = (ej: RoutineExercise) => {
     const modo = modoAlternativa[ej.id] ?? "inteligente";
@@ -2727,80 +2719,21 @@ linear-gradient(180deg,rgba(18,12,15,.97),rgba(11,12,15,.98));backdrop-filter:bl
           {editorRutina&&<section className="vf-editor"><h2 style={{color:"#D94B55",marginTop:0}}>✏️ EDITAR RUTINA</h2><div className="vf-editor-head"><input className="vf-text" value={editorRutina.nombre} onChange={e=>actualizarRutina(editorRutina.id,r=>({...r,nombre:e.target.value}))}/><input className="vf-text" value={editorRutina.descripcion} onChange={e=>actualizarRutina(editorRutina.id,r=>({...r,descripcion:e.target.value}))}/></div><div className="vf-day-tabs">{editorRutina.dias.map(d=><button className={`vf-day-tab ${editorDia?.id===d.id?"active":""}`} key={d.id} onClick={()=>setEditorDiaId(d.id)}>{d.titulo}</button>)}<button className="vf-primary" onClick={()=>crearDia(editorRutina.id)}>＋ DÍA</button></div>{editorDia&&<><div className="vf-editor-head"><input className="vf-text" value={editorDia.titulo} onChange={e=>actualizarDia(editorRutina.id,editorDia.id,{titulo:e.target.value})}/><input className="vf-text" value={editorDia.subtitulo} onChange={e=>actualizarDia(editorRutina.id,editorDia.id,{subtitulo:e.target.value})}/></div><div className="vf-toolbar" style={{marginTop:12}}><button className="vf-primary" onClick={()=>{setAñadiendoSoloHoy(false);setTargetBiblioteca({rutinaId:editorRutina.id,diaId:editorDia.id});setVista("biblioteca")}}>＋ AÑADIR EJERCICIO</button><button className="vf-danger" onClick={()=>eliminarDia(editorRutina.id,editorDia.id)}>🗑️ ELIMINAR DÍA</button></div>{editorDia.ejercicios.map((ex,i)=><div className="vf-edit-ex" key={ex.id}><strong>{i+1}</strong><div><strong>{ex.nombre}</strong><div className="vf-muted">{ex.musculo} · {ex.patron}</div></div><input className="vf-text" type="number" min={1} value={ex.series} onChange={e=>actualizarEjercicioRutina(editorRutina.id,editorDia.id,ex.id,{series:Math.max(1,Number(e.target.value)||1)})}/><input className="vf-text" value={ex.reps} onChange={e=>actualizarEjercicioRutina(editorRutina.id,editorDia.id,ex.id,{reps:e.target.value})}/><input className="vf-text" value={ex.rir} onChange={e=>actualizarEjercicioRutina(editorRutina.id,editorDia.id,ex.id,{rir:e.target.value})}/><div className="vf-edit-controls"><button onClick={()=>moverEjercicio(editorRutina.id,editorDia.id,i,-1)}>↑</button><button onClick={()=>moverEjercicio(editorRutina.id,editorDia.id,i,1)}>↓</button><button onClick={()=>eliminarEjercicioRutina(editorRutina.id,editorDia.id,ex.id)}>🗑️</button></div></div>)}{!editorDia.ejercicios.length&&<div className="vf-muted" style={{padding:"18px 0"}}>Este día está vacío. Pulsa “Añadir ejercicio”.</div>}</>}</section>}
         </>}
 
-        {vista==="biblioteca"&&<>
-          <h1 className="vf-page-title">📚 BIBLIOTECA DE EJERCICIOS</h1>
-          <p className="vf-lib-count">{biblioteca.length} ejercicios disponibles · {resultadosBiblioteca.length} encontrados · página {paginaBiblioteca} de {totalPaginasBiblioteca}</p>
-
-          {targetBiblioteca&&<div className="vf-section-card" style={{borderColor:"#D94B55"}}>➕ Estás añadiendo ejercicios a una rutina. Pulsa <strong>AÑADIR</strong> en todos los que quieras y después vuelve a RUTINAS.</div>}
-
-          <div className="vf-library-head">
-            <input className="vf-text" placeholder="🔎 Buscar ejercicio, músculo, patrón..." value={busquedaBiblioteca} onChange={e=>setBusquedaBiblioteca(e.target.value)}/>
-            <select className="vf-text" value={filtroMusculo} onChange={e=>setFiltroMusculo(e.target.value)}>{musculos.map(x=><option key={x}>{x}</option>)}</select>
-            <select className="vf-text" value={filtroPatron} onChange={e=>setFiltroPatron(e.target.value)}>{patrones.map(x=><option key={x}>{x}</option>)}</select>
-            <select className="vf-text" value={filtroEquipo} onChange={e=>setFiltroEquipo(e.target.value)}>{equipos.map(x=><option key={x}>{x}</option>)}</select>
-          </div>
-
-          <div className="vf-toolbar">
-            <button className="vf-primary" onClick={()=>setMostrarCrearEjercicio(!mostrarCrearEjercicio)}>⭐ CREAR EJERCICIO PERSONALIZADO</button>
-            {targetBiblioteca&&<button className="vf-secondary" onClick={()=>setVista("rutinas")}>← VOLVER AL EDITOR</button>}
-          </div>
-
-          {mostrarCrearEjercicio&&<div className="vf-section-card">
-            <strong>⭐ Nuevo ejercicio personalizado</strong>
-            <div className="vf-custom-form">
-              <input className="vf-text" placeholder="Nombre" value={nuevoEjercicio.nombre} onChange={e=>setNuevoEjercicio(n=>({...n,nombre:e.target.value}))}/>
-              <input className="vf-text" placeholder="Músculo" value={nuevoEjercicio.musculo} onChange={e=>setNuevoEjercicio(n=>({...n,musculo:e.target.value}))}/>
-              <input className="vf-text" placeholder="Patrón" value={nuevoEjercicio.patron} onChange={e=>setNuevoEjercicio(n=>({...n,patron:e.target.value}))}/>
-              <input className="vf-text" placeholder="Equipo" value={nuevoEjercicio.equipo} onChange={e=>setNuevoEjercicio(n=>({...n,equipo:e.target.value}))}/>
-              <select className="vf-text" value={nuevoEjercicio.tipo} onChange={e=>setNuevoEjercicio(n=>({...n,tipo:e.target.value as "Compuesto"|"Aislamiento"}))}><option>Compuesto</option><option>Aislamiento</option></select>
-            </div>
-            <button className="vf-primary" onClick={crearEjercicioPersonal}>GUARDAR EN BIBLIOTECA</button>
-          </div>}
-
-          <div className="vf-library-grid">
-            {resultadosBibliotecaPagina.map(ex=><div className="vf-lib-card" key={ex.id}>
-              <div className="vf-lib-top">
-                <div><h3>{ex.nombre}</h3><div className="vf-lib-muscle">{ex.musculo}</div></div>
-                <AnatomiaPro id={ex.id} musculo={ex.musculo} patron={ex.patron} nombre={ex.nombre} compact />
-              </div>
-              <div className="vf-lib-meta">💪 {ex.musculo}<br/>🎯 {ex.patron}<br/>⚙️ {ex.equipo} · {ex.tipo}</div>
-              {ex.image_url&&<div className="vf-demo-wrap" style={{marginTop:12}}><img className="vf-demo-video" src={ex.image_url} alt={`Imagen de ${ex.nombre}`} loading="lazy" /></div>}
-              {ex.demo_url&&<details className="vf-demo" onToggle={(e)=>{
-                const abierto=(e.currentTarget as HTMLDetailsElement).open;
-                setDemosAbiertas(prev=>({...prev,[ex.id]:abierto}));
-              }}>
-                <summary>🎬 VER DEMOSTRACIÓN EN MOVIMIENTO</summary>
-                {demosAbiertas[ex.id]&&<div className="vf-demo-wrap">
-                  {ex.demo_url.toLowerCase().endsWith(".gif")
-                    ? <img className="vf-demo-video" src={ex.demo_url} alt={`Demostración de ${ex.nombre}`} loading="lazy" />
-                    : <video className="vf-demo-video" src={ex.demo_url} autoPlay loop muted playsInline preload="none" controls/>}
-                  <div className="vf-demo-label"><span className="vf-demo-live">● DEMO VITORFIT</span><span>Reproducción en bucle</span></div>
-                </div>}
-              </details>}
-              {(()=>{const tec=tecnicaEjercicio(ex);return <details className="vf-technique"><summary>▶ CÓMO HACERLO CORRECTAMENTE</summary><div className="vf-technique-grid"><div className="vf-technique-box"><h4>✅ Técnica</h4><ul>{tec.pasos.map((x,i)=><li key={i}>{x}</li>)}</ul></div><div className="vf-technique-box"><h4>⚠️ Errores comunes</h4><ul>{tec.errores.map((x,i)=><li key={i}>{x}</li>)}</ul></div></div><div className="vf-technique-tip"><strong>💡 Consejo:</strong> {tec.consejo}</div></details>})()}
-              <details className="vf-anatomy-edit" open={editorAnatomiaId===ex.id} onToggle={(e)=>{if((e.currentTarget as HTMLDetailsElement).open)setEditorAnatomiaId(ex.id);else if(editorAnatomiaId===ex.id)setEditorAnatomiaId(null)}}>
-                <summary>✏️ EDITAR ANATOMÍA</summary>
-                <div className="vf-anatomy-editor">
-                  <select className="vf-text" value={anatomiaOverrides[ex.id] ?? ""} onChange={e=>setAnatomiaOverrides(p=>{const n={...p}; if(e.target.value)n[ex.id]=e.target.value; else delete n[ex.id]; return n;})}>
-                    <option value="">Automática (recomendada)</option>
-                    {OPCIONES_ANATOMIA.map(([valor,etiqueta])=><option key={valor} value={valor}>{etiqueta}</option>)}
-                  </select>
-                  <button className="vf-anatomy-reset" onClick={()=>setAnatomiaOverrides(p=>{const n={...p};delete n[ex.id];return n;})}>↺ AUTO</button>
-                </div>
-                <div className="vf-anatomy-saved">{anatomiaOverrides[ex.id] ? "✓ Corrección manual guardada" : "Usando clasificación automática"}</div>
-              </details>
-              {targetBiblioteca&&<button className="vf-primary" onClick={()=>añadirDesdeBiblioteca(ex)}>＋ AÑADIR</button>}
-            </div>)}
-          </div>
-
-          {!!resultadosBiblioteca.length&&<div className="vf-toolbar" style={{justifyContent:"center",marginTop:18}}>
-            <button className="vf-secondary" disabled={paginaBiblioteca<=1} onClick={()=>{setPaginaBiblioteca(p=>Math.max(1,p-1));setDemosAbiertas({});window.scrollTo({top:0,behavior:"smooth"});}}>← ANTERIOR</button>
-            <span className="vf-muted" style={{alignSelf:"center",fontWeight:800}}>Página {paginaBiblioteca} de {totalPaginasBiblioteca}</span>
-            <button className="vf-primary" disabled={paginaBiblioteca>=totalPaginasBiblioteca} onClick={()=>{setPaginaBiblioteca(p=>Math.min(totalPaginasBiblioteca,p+1));setDemosAbiertas({});window.scrollTo({top:0,behavior:"smooth"});}}>SIGUIENTE →</button>
-          </div>}
-
-          {!resultadosBiblioteca.length&&<div className="vf-section-card">No encontré ejercicios con esos filtros.</div>}
-        </>}
+        {vista==="biblioteca"&&<><h1 className="vf-page-title">📚 BIBLIOTECA DE EJERCICIOS</h1><p className="vf-lib-count">{biblioteca.length} ejercicios disponibles · {resultadosBiblioteca.length} visibles</p>{targetBiblioteca&&<div className="vf-section-card" style={{borderColor:"#D94B55"}}>➕ Estás añadiendo ejercicios a una rutina. Pulsa <strong>AÑADIR</strong> en todos los que quieras y después vuelve a RUTINAS.</div>}<div className="vf-library-head"><input className="vf-text" placeholder="🔎 Buscar ejercicio, músculo, patrón..." value={busquedaBiblioteca} onChange={e=>setBusquedaBiblioteca(e.target.value)}/><select className="vf-text" value={filtroMusculo} onChange={e=>setFiltroMusculo(e.target.value)}>{musculos.map(x=><option key={x}>{x}</option>)}</select><select className="vf-text" value={filtroPatron} onChange={e=>setFiltroPatron(e.target.value)}>{patrones.map(x=><option key={x}>{x}</option>)}</select><select className="vf-text" value={filtroEquipo} onChange={e=>setFiltroEquipo(e.target.value)}>{equipos.map(x=><option key={x}>{x}</option>)}</select></div><div className="vf-toolbar"><button className="vf-primary" onClick={()=>setMostrarCrearEjercicio(!mostrarCrearEjercicio)}>⭐ CREAR EJERCICIO PERSONALIZADO</button>{targetBiblioteca&&<button className="vf-secondary" onClick={()=>setVista("rutinas")}>← VOLVER AL EDITOR</button>}</div>{mostrarCrearEjercicio&&<div className="vf-section-card"><strong>⭐ Nuevo ejercicio personalizado</strong><div className="vf-custom-form"><input className="vf-text" placeholder="Nombre" value={nuevoEjercicio.nombre} onChange={e=>setNuevoEjercicio(n=>({...n,nombre:e.target.value}))}/><input className="vf-text" placeholder="Músculo" value={nuevoEjercicio.musculo} onChange={e=>setNuevoEjercicio(n=>({...n,musculo:e.target.value}))}/><input className="vf-text" placeholder="Patrón" value={nuevoEjercicio.patron} onChange={e=>setNuevoEjercicio(n=>({...n,patron:e.target.value}))}/><input className="vf-text" placeholder="Equipo" value={nuevoEjercicio.equipo} onChange={e=>setNuevoEjercicio(n=>({...n,equipo:e.target.value}))}/><select className="vf-text" value={nuevoEjercicio.tipo} onChange={e=>setNuevoEjercicio(n=>({...n,tipo:e.target.value as "Compuesto"|"Aislamiento"}))}><option>Compuesto</option><option>Aislamiento</option></select></div><button className="vf-primary" onClick={crearEjercicioPersonal}>GUARDAR EN BIBLIOTECA</button></div>}<div className="vf-library-grid">{resultadosBiblioteca.map(ex=><div className="vf-lib-card" key={ex.id}><div className="vf-lib-top"><div><h3>{ex.nombre}</h3><div className="vf-lib-muscle">{ex.musculo}</div></div><AnatomiaPro id={ex.id} musculo={ex.musculo} patron={ex.patron} nombre={ex.nombre} compact /></div><div className="vf-lib-meta">💪 {ex.musculo}<br/>🎯 {ex.patron}<br/>⚙️ {ex.equipo} · {ex.tipo}</div>
+{ex.demo_url&&<details className="vf-demo"><summary>🎬 VER DEMOSTRACIÓN EN MOVIMIENTO</summary><div className="vf-demo-wrap">{ex.demo_url.toLowerCase().endsWith(".gif") ? <img className="vf-demo-video" src={ex.demo_url} alt={`Demostración de ${ex.nombre}`} loading="lazy" /> : <video className="vf-demo-video" src={ex.demo_url} autoPlay loop muted playsInline preload="metadata" controls/>}<div className="vf-demo-label"><span className="vf-demo-live">● DEMO VITORFIT</span><span>Reproducción en bucle</span></div></div></details>}
+{(()=>{const tec=tecnicaEjercicio(ex);return <details className="vf-technique"><summary>▶ CÓMO HACERLO CORRECTAMENTE</summary><div className="vf-technique-grid"><div className="vf-technique-box"><h4>✅ Técnica</h4><ul>{tec.pasos.map((x,i)=><li key={i}>{x}</li>)}</ul></div><div className="vf-technique-box"><h4>⚠️ Errores comunes</h4><ul>{tec.errores.map((x,i)=><li key={i}>{x}</li>)}</ul></div></div><div className="vf-technique-tip"><strong>💡 Consejo:</strong> {tec.consejo}</div></details>})()}
+<details className="vf-anatomy-edit" open={editorAnatomiaId===ex.id} onToggle={(e)=>{if((e.currentTarget as HTMLDetailsElement).open)setEditorAnatomiaId(ex.id);else if(editorAnatomiaId===ex.id)setEditorAnatomiaId(null)}}>
+  <summary>✏️ EDITAR ANATOMÍA</summary>
+  <div className="vf-anatomy-editor">
+    <select className="vf-text" value={anatomiaOverrides[ex.id] ?? ""} onChange={e=>setAnatomiaOverrides(p=>{const n={...p}; if(e.target.value)n[ex.id]=e.target.value; else delete n[ex.id]; return n;})}>
+      <option value="">Automática (recomendada)</option>
+      {OPCIONES_ANATOMIA.map(([valor,etiqueta])=><option key={valor} value={valor}>{etiqueta}</option>)}
+    </select>
+    <button className="vf-anatomy-reset" onClick={()=>setAnatomiaOverrides(p=>{const n={...p};delete n[ex.id];return n;})}>↺ AUTO</button>
+  </div>
+  <div className="vf-anatomy-saved">{anatomiaOverrides[ex.id] ? "✓ Corrección manual guardada" : "Usando clasificación automática"}</div>
+</details>
+{targetBiblioteca&&<button className="vf-primary" onClick={()=>añadirDesdeBiblioteca(ex)}>＋ AÑADIR</button>}</div>)}</div>{!resultadosBiblioteca.length&&<div className="vf-section-card">No encontré ejercicios con esos filtros.</div>}</>}
 
         {vista === "nutricion" && <>
           {seccionNutricion === "inicio" && <>
