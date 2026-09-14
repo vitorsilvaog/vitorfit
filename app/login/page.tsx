@@ -1,6 +1,6 @@
 "use client";
 
-import { useState } from "react";
+import { useEffect, useState } from "react";
 import { useRouter } from "next/navigation";
 import { createClient } from "../../utils/supabase/client";
 
@@ -12,6 +12,30 @@ export default function LoginPage() {
   const [password, setPassword] = useState("");
   const [loading, setLoading] = useState(false);
   const [mensaje, setMensaje] = useState("");
+  const [comprobandoSesion, setComprobandoSesion] = useState(true);
+
+  useEffect(() => {
+    let activo = true;
+
+    const recuperarSesion = async () => {
+      const { data: { session } } = await supabase.auth.getSession();
+      if (!activo) return;
+
+      if (session) {
+        router.replace("/entrenamiento");
+        router.refresh();
+        return;
+      }
+
+      setComprobandoSesion(false);
+    };
+
+    recuperarSesion();
+
+    return () => {
+      activo = false;
+    };
+  }, [router, supabase]);
 
   const iniciarSesion = async () => {
     if (!email || !password) {
@@ -37,6 +61,17 @@ export default function LoginPage() {
     router.push("/entrenamiento");
     router.refresh();
   };
+
+  if (comprobandoSesion) {
+    return (
+      <main style={{ minHeight: "100vh", background: "#08090c", display: "grid", placeItems: "center", color: "white" }}>
+        <div style={{ textAlign: "center" }}>
+          <div style={{ fontSize: "48px", fontWeight: 900, color: "#ff2948" }}>V</div>
+          <div style={{ marginTop: "10px", color: "#888" }}>Entrando en VitorFit...</div>
+        </div>
+      </main>
+    );
+  }
 
   return (
     <main

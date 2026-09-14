@@ -126,6 +126,18 @@ type MealPlanEntry = {
   nutrition_meals?: NutritionMeal | null;
 };
 
+type ShoppingCategory =
+  | "frutas_verduras"
+  | "carne_pescado"
+  | "lacteos_huevos"
+  | "arroz_pasta_cereales"
+  | "conservas_legumbres"
+  | "pan_harinas"
+  | "salsas_especias"
+  | "congelados"
+  | "bebidas_otros"
+  | "limpieza_hogar";
+
 type ShoppingItem = {
   id: string;
   owner_id: string;
@@ -135,6 +147,7 @@ type ShoppingItem = {
   checked: boolean;
   manual: boolean;
   item_key: string;
+  category?: ShoppingCategory | null;
 };
 
 type Family = {
@@ -756,6 +769,72 @@ const NUTRITION_LABELS: Record<NutritionCategory, string> = {
   snack: "Meriendas",
   cena: "Cenas",
 };
+
+const SHOPPING_CATEGORIES: Array<{ id: ShoppingCategory; label: string; products: string[] }> = [
+  { id: "frutas_verduras", label: "🥬 Frutas y verduras", products: [
+    "Tomate", "Tomate cherry", "Cebolla", "Cebolla morada", "Ajo", "Lechuga", "Espinacas", "Zanahoria",
+    "Pimiento rojo", "Pimiento verde", "Calabacín", "Berenjena", "Brócoli", "Coliflor", "Champiñones", "Pepino",
+    "Patata", "Boniato", "Aguacate", "Plátano", "Manzana", "Pera", "Naranja", "Mandarina", "Mango", "Fresas",
+    "Arándanos", "Uvas", "Piña", "Limón", "Lima", "Kiwi"
+  ] },
+  { id: "carne_pescado", label: "🥩 Carne y pescado", products: [
+    "Pechuga de pollo", "Muslos de pollo", "Pavo", "Carne picada de ternera", "Ternera", "Cerdo", "Lomo de cerdo",
+    "Jamón cocido", "Jamón serrano", "Salmón", "Merluza", "Bacalao", "Atún fresco", "Lubina", "Dorada", "Gambas",
+    "Langostinos", "Calamares"
+  ] },
+  { id: "lacteos_huevos", label: "🥛 Lácteos y huevos", products: [
+    "Huevos", "Claras de huevo", "Leche", "Leche sin lactosa", "Yogur griego", "Yogur natural", "Skyr",
+    "Queso cottage", "Mozzarella", "Queso rallado", "Queso fresco", "Queso crema", "Parmesano", "Mantequilla"
+  ] },
+  { id: "arroz_pasta_cereales", label: "🍚 Arroz, pasta y cereales", products: [
+    "Arroz", "Arroz basmati", "Arroz integral", "Arroz de sushi", "Pasta", "Pasta integral", "Espaguetis", "Macarrones",
+    "Ñoquis", "Avena", "Copos de avena", "Cuscús", "Quinoa", "Cereales", "Granola"
+  ] },
+  { id: "conservas_legumbres", label: "🥫 Conservas y legumbres", products: [
+    "Atún en lata", "Sardinas en lata", "Maíz", "Tomate triturado", "Tomate frito", "Garbanzos", "Lentejas",
+    "Alubias blancas", "Feijão negro", "Guisantes", "Aceitunas", "Pimientos en conserva", "Pepinillos"
+  ] },
+  { id: "pan_harinas", label: "🥖 Pan y harinas", products: [
+    "Pan integral", "Pan de molde", "Pan de hamburguesa", "Pan de pita", "Tortillas de trigo", "Tortillas de maíz",
+    "Harina de trigo", "Harina integral", "Maicena", "Pan rallado", "Levadura", "Wraps"
+  ] },
+  { id: "salsas_especias", label: "🧂 Salsas, especias y condimentos", products: [
+    "Sal", "Pimienta", "Aceite de oliva", "Vinagre", "Salsa de soja", "Teriyaki", "Ketchup", "Mostaza", "Mayonesa",
+    "Salsa barbacoa", "Ajo en polvo", "Cebolla en polvo", "Pimentón", "Orégano", "Curry", "Comino", "Canela",
+    "Perejil", "Albahaca", "Miel", "Edulcorante"
+  ] },
+  { id: "congelados", label: "🧊 Congelados", products: [
+    "Gambas congeladas", "Verduras congeladas", "Brócoli congelado", "Espinacas congeladas", "Frutos rojos congelados",
+    "Mango congelado", "Pescado congelado", "Patatas congeladas", "Hielo"
+  ] },
+  { id: "bebidas_otros", label: "🧴 Bebidas y otros", products: [
+    "Agua", "Agua con gas", "Café", "Té", "Infusiones", "Bebida vegetal", "Zumo", "Refresco zero",
+    "Proteína whey", "Creatina", "Crema de cacahuete", "Mermelada", "Chía", "Chocolate negro"
+  ] },
+  { id: "limpieza_hogar", label: "🧻 Limpieza / hogar", products: [
+    "Papel de cocina", "Papel higiénico", "Servilletas", "Detergente ropa", "Suavizante", "Lavavajillas",
+    "Pastillas lavavajillas", "Limpiador multiusos", "Lejía", "Bolsas de basura", "Esponjas", "Estropajos",
+    "Film transparente", "Papel de aluminio", "Papel de horno"
+  ] },
+];
+
+const inferShoppingCategory = (name: string): ShoppingCategory => {
+  const n = slug(name);
+  for (const group of SHOPPING_CATEGORIES) {
+    if (group.products.some((product) => slug(product) === n)) return group.id;
+  }
+  const texto = name.toLowerCase();
+  if (/pollo|pavo|ternera|cerdo|carne|jam[oó]n|salm[oó]n|merluza|bacalao|at[uú]n fresco|lubina|dorada|gamba|langostino|calamar|pescado/.test(texto)) return "carne_pescado";
+  if (/huevo|leche|yogur|skyr|queso|mozzarella|cottage|mantequilla|parmesano/.test(texto)) return "lacteos_huevos";
+  if (/arroz|pasta|espagueti|macarr[oó]n|ñoqui|avena|cusc[uú]s|quinoa|cereal|granola/.test(texto)) return "arroz_pasta_cereales";
+  if (/lata|conserva|garbanzo|lenteja|alubia|feij|ma[ií]z|guisante|aceituna|pepinillo/.test(texto)) return "conservas_legumbres";
+  if (/pan|harina|maicena|tortilla|wrap|levadura/.test(texto)) return "pan_harinas";
+  if (/sal$|pimienta|aceite|vinagre|salsa|teriyaki|ketchup|mostaza|mayonesa|barbacoa|piment[oó]n|or[eé]gano|curry|comino|canela|perejil|albahaca|miel|edulcorante/.test(texto)) return "salsas_especias";
+  if (/congelad|hielo/.test(texto)) return "congelados";
+  if (/papel|detergente|suavizante|lavavajillas|limpiador|lej[ií]a|basura|esponja|estropajo|film|aluminio/.test(texto)) return "limpieza_hogar";
+  if (/agua|caf[eé]|t[eé]|infusi[oó]n|bebida|zumo|refresco|whey|prote[ií]na|creatina|cacahuete|mermelada|ch[ií]a|chocolate/.test(texto)) return "bebidas_otros";
+  return "frutas_verduras";
+};
 export default function Entrenamiento() {
 const supabase = useMemo(() => createClient(), []);
 const router = useRouter();
@@ -771,6 +850,7 @@ async function cerrarSesion() {
   const [listaCompra, setListaCompra] = useState<ShoppingItem[]>([]);
   const [nuevoProductoCompra, setNuevoProductoCompra] = useState("");
   const [nuevaCantidadCompra, setNuevaCantidadCompra] = useState("");
+  const [categoriaManualCompra, setCategoriaManualCompra] = useState<ShoppingCategory>("frutas_verduras");
   const [cargandoNutricion, setCargandoNutricion] = useState(false);
   const [busquedaNutricion, setBusquedaNutricion] = useState("");
   const [platoAbiertoId, setPlatoAbiertoId] = useState<string | null>(null);
@@ -921,7 +1001,12 @@ const ultimoRegistroHistorial =
     let activo = true;
 
     const cargarUsuario = async () => {
-      const { data: { session } } = await supabase.auth.getSession();
+      let { data: { session } } = await supabase.auth.getSession();
+      if (!session) {
+        // Intenta recuperar una sesión persistida antes de mandar al login.
+        const { data: refreshed } = await supabase.auth.refreshSession();
+        session = refreshed.session;
+      }
       if (!session) {
         router.replace("/login");
         return;
@@ -2358,7 +2443,10 @@ const planificarFecha = (fecha: Date) => {
       .order("checked", { ascending: true })
       .order("created_at", { ascending: true });
     if (error) { setMensaje(`❌ ${error.message}`); return; }
-    setListaCompra((data ?? []) as ShoppingItem[]);
+    setListaCompra(((data ?? []) as ShoppingItem[]).map((item) => ({
+      ...item,
+      category: item.category ?? inferShoppingCategory(item.name),
+    })));
   };
 
   const sincronizarListaCompra = async () => {
@@ -2386,6 +2474,7 @@ const planificarFecha = (fecha: Date) => {
       owner_id: NUTRITION_PLAN_OWNER_ID, week_start: weekStart, name: v.name,
       quantity: Array.from(new Set(v.cantidades)).join(" + ") || null,
       checked: existentes.get(key)?.checked ?? false, manual: false, item_key: key,
+      category: inferShoppingCategory(v.name),
     }));
     if (filas.length) {
       const { error } = await supabase.from("nutrition_shopping_items").insert(filas);
@@ -2403,6 +2492,7 @@ const planificarFecha = (fecha: Date) => {
     const { error } = await supabase.from("nutrition_shopping_items").insert({
       owner_id: NUTRITION_PLAN_OWNER_ID, week_start: weekStart, name,
       quantity: nuevaCantidadCompra.trim() || null, checked: false, manual: true, item_key: itemKey,
+      category: categoriaManualCompra,
     });
     if (error) { setMensaje(`❌ ${error.message}`); return; }
     setNuevoProductoCompra(""); setNuevaCantidadCompra("");
@@ -2419,6 +2509,42 @@ const planificarFecha = (fecha: Date) => {
     const { error } = await supabase.from("nutrition_shopping_items").delete().eq("id", id);
     if (error) { setMensaje(`❌ ${error.message}`); return; }
     setListaCompra(prev => prev.filter(x => x.id !== id));
+  };
+
+  const cambiarEstadoProductoCatalogo = async (name: string, category: ShoppingCategory) => {
+    if (!tieneNutricionPrivada) return;
+    const weekStart = fechaISOlocal(semanaNutricion);
+    const key = `catalog-${slug(name)}`;
+    const existente = listaCompra.find((item) => item.item_key === key);
+
+    // ○ No necesito -> 🛒 Coger
+    if (!existente) {
+      const { error } = await supabase.from("nutrition_shopping_items").insert({
+        owner_id: NUTRITION_PLAN_OWNER_ID, week_start: weekStart, name, quantity: null,
+        checked: false, manual: true, item_key: key, category,
+      });
+      if (error) { setMensaje(`❌ ${error.message}`); return; }
+      await cargarListaCompra();
+      return;
+    }
+
+    // 🛒 Coger -> ✓ Comprado
+    if (!existente.checked) {
+      const { error } = await supabase.from("nutrition_shopping_items").update({ checked: true }).eq("id", existente.id);
+      if (error) { setMensaje(`❌ ${error.message}`); return; }
+      setListaCompra((prev) => prev.map((item) => item.id === existente.id ? { ...item, checked: true } : item));
+      return;
+    }
+
+    // ✓ Comprado -> ○ No necesito
+    await borrarProductoCompra(existente.id);
+  };
+
+  const estadoProductoCatalogo = (name: string) => {
+    const item = listaCompra.find((x) => x.item_key === `catalog-${slug(name)}`);
+    if (!item) return { label: "○ No necesito", state: "none" as const };
+    if (item.checked) return { label: "✓ Comprado", state: "done" as const };
+    return { label: "🛒 Coger", state: "take" as const };
   };
 
   const moverSemanaNutricion = (delta: number) => setSemanaNutricion((prev) => {
@@ -2773,9 +2899,13 @@ linear-gradient(180deg,rgba(18,12,15,.97),rgba(11,12,15,.98));backdrop-filter:bl
         </button>
       </>}
 
-      <button className={vista === "nutricion" ? "active" : ""} onClick={() => abrirNutricion("inicio")}>
+      <button className={vista === "nutricion" && seccionNutricion !== "compra" ? "active" : ""} onClick={() => abrirNutricion("inicio")}>
         <span>🍽️</span><b>Nutrición</b>
       </button>
+
+      {esSoloNutricion && <button className={vista === "nutricion" && seccionNutricion === "compra" ? "active" : ""} onClick={() => { abrirNutricion("compra"); setTimeout(cargarListaCompra, 0); }}>
+        <span>🛒</span><b>Lista compra</b>
+      </button>}
 
       {!esSoloNutricion && <>
         <button className={vista === "calendario" ? "active" : ""} onClick={() => setVista("calendario")}>
@@ -3117,22 +3247,47 @@ linear-gradient(180deg,rgba(18,12,15,.97),rgba(11,12,15,.98));backdrop-filter:bl
 
           {seccionNutricion === "compra" && tieneNutricionPrivada && <>
             <button className="vf-secondary vf-back-nutrition" onClick={()=>setSeccionNutricion("plan")}>← VOLVER A NUESTRA SEMANA</button>
-            <div className="vf-nutrition-hero"><div><div className="vf-eyebrow">🔒 COMPARTIDA</div><h1>🛒 Lista de la compra</h1><p>Ingredientes de las comidas y cenas de esta semana. Lo que marque uno, lo ve el otro.</p></div><button className="vf-primary" onClick={sincronizarListaCompra}>↻ ACTUALIZAR DESDE EL MENÚ</button></div>
+            <div className="vf-nutrition-hero"><div><div className="vf-eyebrow">🔒 COMPARTIDA</div><h1>🛒 Lista de la compra</h1><p>Elige lo que necesitáis y, en la tienda, márcalo como comprado. Los dos veis el mismo estado.</p></div><button className="vf-primary" onClick={sincronizarListaCompra}>↻ AÑADIR INGREDIENTES DEL MENÚ</button></div>
+
             <section className="vf-section-card">
-              <div className="vf-toolbar" style={{display:"grid",gridTemplateColumns:"2fr 1fr auto",gap:8}}>
-                <input className="vf-text" placeholder="Añadir producto (ej. leche)" value={nuevoProductoCompra} onChange={e=>setNuevoProductoCompra(e.target.value)}/>
-                <input className="vf-text" placeholder="Cantidad (opcional)" value={nuevaCantidadCompra} onChange={e=>setNuevaCantidadCompra(e.target.value)}/>
+              <div className="vf-card-kicker">AÑADIR PRODUCTO PERSONALIZADO</div>
+              <div className="vf-toolbar" style={{display:"grid",gridTemplateColumns:"2fr 1fr 1.4fr auto",gap:8,marginTop:10}}>
+                <input className="vf-text" placeholder="Producto (ej. leche)" value={nuevoProductoCompra} onChange={e=>setNuevoProductoCompra(e.target.value)}/>
+                <input className="vf-text" placeholder="Cantidad" value={nuevaCantidadCompra} onChange={e=>setNuevaCantidadCompra(e.target.value)}/>
+                <select className="vf-text" value={categoriaManualCompra} onChange={e=>setCategoriaManualCompra(e.target.value as ShoppingCategory)}>
+                  {SHOPPING_CATEGORIES.map(cat=><option key={cat.id} value={cat.id}>{cat.label}</option>)}
+                </select>
                 <button className="vf-primary" onClick={añadirProductoCompra}>＋ AÑADIR</button>
               </div>
-              <div style={{marginTop:14,display:"grid",gap:8}}>
-                {listaCompra.map(item=><div key={item.id} style={{display:"grid",gridTemplateColumns:"auto 1fr auto",gap:10,alignItems:"center",padding:"11px 12px",border:"1px solid var(--line)",borderRadius:10,opacity:item.checked?.55:1}}>
-                  <input type="checkbox" checked={item.checked} onChange={()=>marcarProductoCompra(item)} style={{width:20,height:20}}/>
-                  <div style={{textDecoration:item.checked?"line-through":"none"}}><strong>{item.name}</strong>{item.quantity&&<span className="vf-muted"> · {item.quantity}</span>}{item.manual&&<small style={{display:"block",color:"#777"}}>Añadido manualmente</small>}</div>
-                  <button className="vf-danger" onClick={()=>borrarProductoCompra(item.id)}>🗑️</button>
-                </div>)}
-                {!listaCompra.length&&<div className="vf-muted">La lista está vacía. Pulsa “ACTUALIZAR DESDE EL MENÚ” para generar los ingredientes de esta semana.</div>}
-              </div>
             </section>
+
+            <div style={{display:"grid",gap:14,marginTop:14}}>
+              {SHOPPING_CATEGORIES.map((cat) => {
+                const extras = listaCompra.filter((item) => (item.category ?? inferShoppingCategory(item.name)) === cat.id && !cat.products.some((p) => slug(p) === slug(item.name)));
+                return <section className="vf-section-card" key={cat.id}>
+                  <div style={{display:"flex",justifyContent:"space-between",alignItems:"center",gap:10,marginBottom:12}}>
+                    <h2 style={{margin:0,fontSize:20}}>{cat.label}</h2>
+                    <span className="vf-muted">{cat.products.length + extras.length} opciones</span>
+                  </div>
+                  <div style={{display:"grid",gridTemplateColumns:"repeat(auto-fit,minmax(220px,1fr))",gap:8}}>
+                    {cat.products.map((product) => {
+                      const estado = estadoProductoCatalogo(product);
+                      return <button key={product} onClick={()=>cambiarEstadoProductoCatalogo(product,cat.id)} style={{textAlign:"left",padding:"12px",borderRadius:10,border:estado.state==="done"?"1px solid rgba(49,210,124,.5)":estado.state==="take"?"1px solid rgba(255,48,74,.45)":"1px solid var(--line)",background:estado.state==="done"?"rgba(49,210,124,.08)":estado.state==="take"?"rgba(255,48,74,.08)":"#101217",color:"#fff",cursor:"pointer"}}>
+                        <strong style={{display:"block",marginBottom:5,textDecoration:estado.state==="done"?"line-through":"none"}}>{product}</strong>
+                        <small style={{color:estado.state==="done"?"#31d27c":estado.state==="take"?"var(--red)":"#777"}}>{estado.label}</small>
+                      </button>;
+                    })}
+                    {extras.map((item) => <div key={item.id} style={{display:"grid",gridTemplateColumns:"1fr auto",gap:8,alignItems:"center",padding:"12px",border:"1px solid var(--line)",borderRadius:10,background:"#101217",opacity:item.checked?.6:1}}>
+                      <button onClick={()=>marcarProductoCompra(item)} style={{border:0,background:"transparent",color:"#fff",padding:0,textAlign:"left",cursor:"pointer"}}>
+                        <strong style={{display:"block",textDecoration:item.checked?"line-through":"none"}}>{item.name}</strong>
+                        <small className="vf-muted">{item.quantity ? `${item.quantity} · ` : ""}{item.checked ? "✓ Comprado" : "🛒 Coger"}</small>
+                      </button>
+                      <button className="vf-danger" onClick={()=>borrarProductoCompra(item.id)}>🗑️</button>
+                    </div>)}
+                  </div>
+                </section>;
+              })}
+            </div>
           </>}
 
           {seccionNutricion === "plan" && tieneNutricionPrivada && <>
@@ -3256,7 +3411,7 @@ linear-gradient(180deg,rgba(18,12,15,.97),rgba(11,12,15,.98));backdrop-filter:bl
         
         </div>
       {mensaje&&<div className="vf-message" onClick={()=>setMensaje("")}>{mensaje}</div>}
-      <nav className="vf-bottom">
+      <nav className="vf-bottom" style={esSoloNutricion ? {gridTemplateColumns:"1fr 1fr"} : undefined}>
         {!esSoloNutricion && <>
           <button className={`vf-nav ${vista==="inicio"?"active":""}`} onClick={()=>setVista("inicio")}><span>⌂</span>INICIO</button>
           <button className={`vf-nav ${vista==="entreno"?"active":""}`} onClick={abrirEntrenamiento}><span>🏋️</span>ENTRENO</button>
@@ -3265,7 +3420,8 @@ linear-gradient(180deg,rgba(18,12,15,.97),rgba(11,12,15,.98));backdrop-filter:bl
           <button className={`vf-nav ${vista==="rutinas"?"active":""}`} onClick={()=>setVista("rutinas")}><span>📋</span>RUTINAS</button>
           <button className={`vf-nav ${vista==="biblioteca"?"active":""}`} onClick={()=>{setTargetBiblioteca(null);setVista("biblioteca")}}><span>📚</span>BIBLIOTECA</button>
         </>}
-        <button className={`vf-nav ${vista==="nutricion"?"active":""}`} onClick={()=>abrirNutricion("inicio")}><span>🍽️</span>NUTRICIÓN</button>
+        <button className={`vf-nav ${vista==="nutricion" && seccionNutricion!=="compra"?"active":""}`} onClick={()=>abrirNutricion("inicio")}><span>🍽️</span>NUTRICIÓN</button>
+        {esSoloNutricion && <button className={`vf-nav ${vista==="nutricion" && seccionNutricion==="compra"?"active":""}`} onClick={()=>{abrirNutricion("compra");setTimeout(cargarListaCompra,0)}}><span>🛒</span>LISTA COMPRA</button>}
         {!esSoloNutricion && <>
           <button className={`vf-nav ${vista==="calendario"?"active":""}`} onClick={()=>setVista("calendario")}><span>📅</span>CALENDARIO</button>
           <button className={`vf-nav ${vista==="ajustes"?"active":""}`} onClick={()=>setVista("ajustes")}><span>⚙️</span>AJUSTES</button>
