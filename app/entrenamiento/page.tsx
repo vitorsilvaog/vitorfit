@@ -954,8 +954,8 @@ const ultimoRegistroHistorial =
     return () => { activo = false; };
   }, [router, supabase]);
 
-  // Comprueba si el usuario pertenece al espacio privado de Nutrición.
-  // owner = Víctor · partner = pareja (solo Nutrición).
+  // Comprueba el perfil de VitorFit para decidir quién puede ver el espacio privado.
+  // En Supabase usamos: owner = Víctor · nutrition_only = pareja (solo Nutrición).
   useEffect(() => {
     if (!userId) {
       setNutritionPrivateRole(null);
@@ -963,28 +963,47 @@ const ultimoRegistroHistorial =
     }
 
     let activo = true;
-    supabase
-      .from("nutrition_private_members")
-      .select("role")
-      .eq("user_id", userId)
-      .maybeSingle()
-      .then(({ data, error }) => {
-        if (!activo) return;
-        if (error) {
-          console.error("VitorFit nutrición privada: miembro", error);
+
+    const cargarRolNutricion = async () => {
+      const { data, error } = await supabase
+        .from("vitorfit_profiles")
+        .select("role, household_id")
+        .eq("user_id", userId)
+        .maybeSingle();
+
+      if (!activo) return;
+
+      if (error) {
+        console.error("VitorFit nutrición privada: perfil", error);
+
+        // Tu cuenta propietaria mantiene acceso aunque falle temporalmente la lectura del perfil.
+        if (userId === NUTRITION_ADMIN_ID) {
+          setNutritionPrivateRole("owner");
+        } else {
           setNutritionPrivateRole(null);
-          return;
         }
+        return;
+      }
 
-        const role = data?.role === "owner" || data?.role === "partner" ? data.role : null;
-        setNutritionPrivateRole(role);
+      const role =
+        data?.role === "owner"
+          ? "owner"
+          : data?.role === "nutrition_only"
+            ? "partner"
+            : null;
 
-        // La cuenta de pareja solo puede usar Nutrición.
-        if (role === "partner") {
-          setVista("nutricion");
-          setSeccionNutricion("inicio");
-        }
-      });
+      // Exigimos además que el perfil pertenezca a un hogar compartido.
+      const roleFinal = data?.household_id ? role : (userId === NUTRITION_ADMIN_ID ? "owner" : null);
+      setNutritionPrivateRole(roleFinal);
+
+      // La cuenta de pareja solo puede usar Nutrición.
+      if (roleFinal === "partner") {
+        setVista("nutricion");
+        setSeccionNutricion("inicio");
+      }
+    };
+
+    cargarRolNutricion();
 
     return () => { activo = false; };
   }, [userId, supabase]);
