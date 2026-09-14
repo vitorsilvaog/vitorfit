@@ -738,6 +738,7 @@ const compactarRegistros = (lista: Registro[]) => {
   return Array.from(mejores.values());
 };
 const NUTRITION_ADMIN_ID = "95250377-5141-49fc-ae6c-27db3f25f9e3";
+const NUTRITION_PLAN_OWNER_ID = NUTRITION_ADMIN_ID;
 const NUTRITION_LABELS: Record<NutritionCategory, string> = {
   desayuno: "Desayunos",
   comida: "Comidas",
@@ -830,6 +831,7 @@ const ultimoRegistroHistorial =
   const [splashLeaving, setSplashLeaving] = useState(false);
   const [splashProgress, setSplashProgress] = useState(0);
   const [userId, setUserId] = useState<string | null>(null);
+  const [nutritionPrivateRole, setNutritionPrivateRole] = useState<"owner" | "partner" | null>(null);
   const keyUsuario = (base: string) =>
   userId ? `${base}-${userId}` : base;
   const [nubeLista, setNubeLista] = useState(false);
@@ -951,6 +953,49 @@ const ultimoRegistroHistorial =
     cargarUsuario();
     return () => { activo = false; };
   }, [router, supabase]);
+
+  // Comprueba si el usuario pertenece al espacio privado de Nutrición.
+  // owner = Víctor · partner = pareja (solo Nutrición).
+  useEffect(() => {
+    if (!userId) {
+      setNutritionPrivateRole(null);
+      return;
+    }
+
+    let activo = true;
+    supabase
+      .from("nutrition_private_members")
+      .select("role")
+      .eq("user_id", userId)
+      .maybeSingle()
+      .then(({ data, error }) => {
+        if (!activo) return;
+        if (error) {
+          console.error("VitorFit nutrición privada: miembro", error);
+          setNutritionPrivateRole(null);
+          return;
+        }
+
+        const role = data?.role === "owner" || data?.role === "partner" ? data.role : null;
+        setNutritionPrivateRole(role);
+
+        // La cuenta de pareja solo puede usar Nutrición.
+        if (role === "partner") {
+          setVista("nutricion");
+          setSeccionNutricion("inicio");
+        }
+      });
+
+    return () => { activo = false; };
+  }, [userId, supabase]);
+
+  useEffect(() => {
+    if (nutritionPrivateRole !== "partner") return;
+    if (vista !== "nutricion") {
+      setVista("nutricion");
+      setSeccionNutricion("inicio");
+    }
+  }, [nutritionPrivateRole, vista]);
 
   useEffect(() => {
     if (!userId || typeof window === "undefined") return;
@@ -2017,27 +2062,57 @@ const planificarFecha = (fecha: Date) => {
 
 
   const esAdminNutricion = userId === NUTRITION_ADMIN_ID;
+  const tieneNutricionPrivada = userId === NUTRITION_ADMIN_ID || nutritionPrivateRole === "owner" || nutritionPrivateRole === "partner";
+  const esSoloNutricion = nutritionPrivateRole === "partner";
 
   const cargarNutricion = async () => {
     if (!userId) return;
     setCargandoNutricion(true);
-    const [{ data: meals, error: mealsError }, { data: plan, error: planError }] = await Promise.all([
-      supabase.from("nutrition_meals").select("*").order("created_at", { ascending: false }),
-      supabase.from("user_meal_plan").select("id,user_id,meal_id,plan_date,meal_type,nutrition_meals(*)").order("plan_date", { ascending: true }),
-    ]);
+
+    const { data: meals, error: mealsError } = await supabase
+      .from("nutrition_meals")
+      .select("*")
+      .order("created_at", { ascending: false });
+
+    let plan: any[] = [];
+    let planError: any = null;
+
+    if (tieneNutricionPrivada) {
+      const resultadoPlan = await supabase
+        .from("user_meal_plan")
+        .select("id,user_id,meal_id,plan_date,meal_type,nutrition_meals(*)")
+        .eq("user_id", NUTRITION_PLAN_OWNER_ID)
+        .in("meal_type", ["comida", "cena"])
+        .order("plan_date", { ascending: true });
+
+      plan = resultadoPlan.data ?? [];
+      planError = resultadoPlan.error;
+    }
+
     if (mealsError) console.error("VitorFit nutrición: platos", mealsError);
-    if (planError) console.error("VitorFit nutrición: plan", planError);
-    setPlatosNutricion((meals ?? []).map((m: any) => ({ ...m, ingredients: Array.isArray(m.ingredients) ? m.ingredients : [] })) as NutritionMeal[]);
-    setPlanNutricion((plan ?? []) as unknown as MealPlanEntry[]);
+    if (planError) console.error("VitorFit nutrición privada: plan", planError);
+
+    setPlatosNutricion((meals ?? []).map((m: any) => ({
+      ...m,
+      ingredients: Array.isArray(m.ingredients) ? m.ingredients : [],
+    })) as NutritionMeal[]);
+
+    setPlanNutricion(tieneNutricionPrivada ? (plan as unknown as MealPlanEntry[]) : []);
     setCargandoNutricion(false);
   };
 
   useEffect(() => {
     if (!userId) return;
     cargarNutricion();
-  }, [userId]);
+  }, [userId, nutritionPrivateRole]);
 
   const abrirNutricion = (seccion: "inicio" | NutritionCategory | "plan" | "proponer" | "pendientes" = "inicio") => {
+    if (seccion === "plan" && !tieneNutricionPrivada) {
+      setSeccionNutricion("inicio");
+      setVista("nutricion");
+      setMensaje("🔒 Este plan semanal es privado.");
+      return;
+    }
     setSeccionNutricion(seccion);
     setVista("nutricion");
     if (userId) cargarNutricion();
@@ -2196,24 +2271,43 @@ const planificarFecha = (fecha: Date) => {
   };
 
   const prepararAñadirPlan = (m: NutritionMeal) => {
+    if (!tieneNutricionPrivada) {
+      setMensaje("🔒 El plan semanal es privado.");
+      return;
+    }
+    if (m.category !== "comida" && m.category !== "cena") {
+      setMensaje("ℹ️ Nuestra semana organiza solo comida y cena.");
+      return;
+    }
     setPlatoParaPlan(m);
     setTipoPlanNutricion(m.category);
     setFechaPlanNutricion(new Date().toISOString().slice(0,10));
   };
 
   const añadirPlatoAlPlan = async () => {
-    if (!userId || !platoParaPlan) return;
+    if (!userId || !platoParaPlan || !tieneNutricionPrivada) return;
+    if (tipoPlanNutricion !== "comida" && tipoPlanNutricion !== "cena") return;
+
     const { error } = await supabase.from("user_meal_plan").insert({
-      user_id: userId, meal_id: platoParaPlan.id, plan_date: fechaPlanNutricion, meal_type: tipoPlanNutricion,
+      // Los dos miembros leen/escriben el mismo calendario compartido.
+      user_id: NUTRITION_PLAN_OWNER_ID,
+      meal_id: platoParaPlan.id,
+      plan_date: fechaPlanNutricion,
+      meal_type: tipoPlanNutricion,
     });
     if (error) { setMensaje(`❌ ${error.message}`); return; }
-    setMensaje(`✅ ${platoParaPlan.name} añadido al plan`);
+    setMensaje(`✅ ${platoParaPlan.name} añadido a Nuestra semana`);
     setPlatoParaPlan(null);
     await cargarNutricion();
   };
 
   const quitarDelPlan = async (id: string) => {
-    const { error } = await supabase.from("user_meal_plan").delete().eq("id", id);
+    if (!tieneNutricionPrivada) return;
+    const { error } = await supabase
+      .from("user_meal_plan")
+      .delete()
+      .eq("id", id)
+      .eq("user_id", NUTRITION_PLAN_OWNER_ID);
     if (error) { setMensaje(`❌ ${error.message}`); return; }
     await cargarNutricion();
   };
@@ -2538,47 +2632,51 @@ linear-gradient(180deg,rgba(18,12,15,.97),rgba(11,12,15,.98));backdrop-filter:bl
     </div>
 
     <nav className="vf-side-nav">
-      <button className={vista === "inicio" ? "active" : ""} onClick={() => setVista("inicio")}>
-        <span>⌂</span><b>Inicio</b>
-      </button>
+      {!esSoloNutricion && <>
+        <button className={vista === "inicio" ? "active" : ""} onClick={() => setVista("inicio")}>
+          <span>⌂</span><b>Inicio</b>
+        </button>
 
-      <button className={vista === "entreno" ? "active" : ""} onClick={abrirEntrenamiento}>
-        <span>🏋️</span><b>Entrenamiento</b>
-      </button>
+        <button className={vista === "entreno" ? "active" : ""} onClick={abrirEntrenamiento}>
+          <span>🏋️</span><b>Entrenamiento</b>
+        </button>
 
-      <button className={vista === "historial" ? "active" : ""} onClick={() => setVista("historial")}>
-        <span>◷</span><b>Historial</b>
-      </button>
+        <button className={vista === "historial" ? "active" : ""} onClick={() => setVista("historial")}>
+          <span>◷</span><b>Historial</b>
+        </button>
 
-      <button className={vista === "progreso" ? "active" : ""} onClick={() => setVista("progreso")}>
-        <span>⌁</span><b>Progreso</b>
-      </button>
+        <button className={vista === "progreso" ? "active" : ""} onClick={() => setVista("progreso")}>
+          <span>⌁</span><b>Progreso</b>
+        </button>
 
-      <button className={vista === "rutinas" ? "active" : ""} onClick={() => setVista("rutinas")}>
-        <span>☰</span><b>Rutinas</b>
-      </button>
+        <button className={vista === "rutinas" ? "active" : ""} onClick={() => setVista("rutinas")}>
+          <span>☰</span><b>Rutinas</b>
+        </button>
 
-      <button
-        className={vista === "biblioteca" ? "active" : ""}
-        onClick={() => {
-          setTargetBiblioteca(null);
-          setVista("biblioteca");
-        }}
-      >
-        <span>▦</span><b>Biblioteca</b>
-      </button>
+        <button
+          className={vista === "biblioteca" ? "active" : ""}
+          onClick={() => {
+            setTargetBiblioteca(null);
+            setVista("biblioteca");
+          }}
+        >
+          <span>▦</span><b>Biblioteca</b>
+        </button>
+      </>}
 
       <button className={vista === "nutricion" ? "active" : ""} onClick={() => abrirNutricion("inicio")}>
         <span>🍽️</span><b>Nutrición</b>
       </button>
 
-      <button className={vista === "calendario" ? "active" : ""} onClick={() => setVista("calendario")}>
-        <span>□</span><b>Calendario</b>
-      </button>
+      {!esSoloNutricion && <>
+        <button className={vista === "calendario" ? "active" : ""} onClick={() => setVista("calendario")}>
+          <span>□</span><b>Calendario</b>
+        </button>
 
-      <button className={vista === "ajustes" ? "active" : ""} onClick={() => setVista("ajustes")}>
-        <span>⚙</span><b>Ajustes</b>
-      </button>
+        <button className={vista === "ajustes" ? "active" : ""} onClick={() => setVista("ajustes")}>
+          <span>⚙</span><b>Ajustes</b>
+        </button>
+      </>}
     </nav>
 
     <div className="vf-side-footer">
@@ -2601,28 +2699,28 @@ linear-gradient(180deg,rgba(18,12,15,.97),rgba(11,12,15,.98));backdrop-filter:bl
         />
       </div>
 
-      <div className="vf-day">
+      {!esSoloNutricion && <div className="vf-day">
         <button onClick={() => cambiarDia(-1)}>‹</button>
         <div className="vf-day-pill">
           📅 {diaActual?.titulo ?? "SIN DÍA"}
         </div>
         <button onClick={() => cambiarDia(1)}>›</button>
-      </div>
+      </div>}
 
       <div className="vf-actions">
-        <button
+        {!esSoloNutricion && <button
           className="vf-icon-button"
           onClick={() => setVista("progreso")}
         >
           📈
-        </button>
+        </button>}
       </div>
 
     </header>
 
-    <div className="vf-routine-name">
+    {!esSoloNutricion && <div className="vf-routine-name">
       {rutinaActual?.nombre} · {diaActual?.subtitulo}
-    </div>
+    </div>}
         {vista === "inicio" && <>
           <section className="vf-dashboard-head">
 <div>
@@ -2832,11 +2930,12 @@ linear-gradient(180deg,rgba(18,12,15,.97),rgba(11,12,15,.98));backdrop-filter:bl
         {vista === "nutricion" && <>
           {seccionNutricion === "inicio" && <>
             <section className="vf-nutrition-hero">
-              <div><div className="vf-eyebrow">VITORFIT NUTRICIÓN</div><h1>Nutrición</h1><p>Elige un plato y añádelo a tu plan semanal.</p></div>
+              <div><div className="vf-eyebrow">VITORFIT NUTRICIÓN</div><h1>Nutrición</h1><p>Recetas para todos. Tu planificación privada aparece solo si tienes acceso.</p></div>
               <div style={{display:"flex",gap:8,flexWrap:"wrap"}}>
                 <button className="vf-primary" onClick={()=>{resetFormPlato();setNombreAutorPropuesta("");setSeccionNutricion("proponer")}}>＋ PROPONER PLATO</button>
                 {esAdminNutricion && <button className="vf-secondary" onClick={()=>setSeccionNutricion("pendientes")}>🔔 PENDIENTES ({propuestasPendientes.length})</button>}
                 {esAdminNutricion && <button className="vf-primary" onClick={()=>{resetFormPlato();setMostrarEditorPlato(true)}}>＋ CREAR PLATO</button>}
+                {esSoloNutricion && <button className="vf-secondary" onClick={cerrarSesion}>🚪 CERRAR SESIÓN</button>}
               </div>
             </section>
             <div className="vf-nutrition-categories">
@@ -2845,7 +2944,7 @@ linear-gradient(180deg,rgba(18,12,15,.97),rgba(11,12,15,.98));backdrop-filter:bl
               <button className="vf-nutrition-cat" onClick={()=>setSeccionNutricion("snack")}><span>🍓</span><h3>Meriendas</h3><p>Opciones fáciles para media tarde.</p></button>
               <button className="vf-nutrition-cat" onClick={()=>setSeccionNutricion("cena")}><span>🌙</span><h3>Cenas</h3><p>Opciones para terminar el día.</p></button>
             </div>
-            <div className="vf-nutrition-plan-card"><div><div className="vf-card-kicker">TU ORGANIZACIÓN</div><h3>📅 Plan semanal</h3><p className="vf-muted">Organiza desayuno, comida, merienda y cena de lunes a domingo.</p></div><button className="vf-primary" onClick={()=>setSeccionNutricion("plan")}>ABRIR PLAN SEMANAL</button></div>
+            {tieneNutricionPrivada && <div className="vf-nutrition-plan-card"><div><div className="vf-card-kicker">🔒 NUTRICIÓN PRIVADA</div><h3>📅 Nuestra semana</h3><p className="vf-muted">Plan compartido solo entre vosotros dos · comida y cena de lunes a domingo.</p></div><button className="vf-primary" onClick={()=>abrirNutricion("plan")}>ABRIR NUESTRA SEMANA</button></div>}
           </>}
 
           {["desayuno","comida","snack","cena"].includes(seccionNutricion) && <>
@@ -2855,10 +2954,10 @@ linear-gradient(180deg,rgba(18,12,15,.97),rgba(11,12,15,.98));backdrop-filter:bl
 
             {mostrarEditorPlato && esAdminNutricion && <section className="vf-section-card"><div className="vf-toolbar" style={{justifyContent:"space-between"}}><div><span className="vf-admin-badge">ADMINISTRADOR</span><h2 style={{margin:"8px 0 0"}}>{editandoPlatoId?"Editar plato":"Crear plato"}</h2></div><button className="vf-secondary" onClick={()=>{setMostrarEditorPlato(false);resetFormPlato()}}>✕ CERRAR</button></div><div className="vf-nutrition-form"><div className="vf-nutrition-form-grid"><input className="vf-text" placeholder="Nombre del plato" value={formPlato.name} onChange={e=>setFormPlato(f=>({...f,name:e.target.value}))}/><select className="vf-text" value={formPlato.category} onChange={e=>setFormPlato(f=>({...f,category:e.target.value as NutritionCategory}))}><option value="desayuno">Desayuno</option><option value="comida">Comida</option><option value="snack">Merienda</option><option value="cena">Cena</option></select><input className="vf-text" type="number" placeholder="kcal" value={formPlato.calories} onChange={e=>setFormPlato(f=>({...f,calories:e.target.value}))}/><input className="vf-text" type="number" placeholder="Proteína g" value={formPlato.protein} onChange={e=>setFormPlato(f=>({...f,protein:e.target.value}))}/><input className="vf-text" type="number" placeholder="Carbos g" value={formPlato.carbs} onChange={e=>setFormPlato(f=>({...f,carbs:e.target.value}))}/></div><div className="vf-nutrition-form-grid" style={{gridTemplateColumns:"1fr 2fr 1fr"}}><input className="vf-text" type="number" placeholder="Grasas g" value={formPlato.fats} onChange={e=>setFormPlato(f=>({...f,fats:e.target.value}))}/><input className="vf-text" placeholder="Descripción" value={formPlato.description} onChange={e=>setFormPlato(f=>({...f,description:e.target.value}))}/><label className="vf-text" style={{display:"flex",alignItems:"center",gap:8}}><input type="checkbox" checked={formPlato.published} onChange={e=>setFormPlato(f=>({...f,published:e.target.checked}))}/> Publicado</label></div><label className="vf-muted">Foto del plato<input className="vf-text" style={{display:"block",width:"100%",marginTop:6}} type="file" accept="image/*" onChange={e=>setArchivoNutricion(e.target.files?.[0]??null)}/></label><textarea className="vf-text" placeholder={'Ingredientes: una línea por ingrediente. Ejemplo:\n60 g | Avena\n200 ml | Leche'} value={formPlato.ingredients} onChange={e=>setFormPlato(f=>({...f,ingredients:e.target.value}))}/><textarea className="vf-text" placeholder="Preparación paso a paso..." value={formPlato.preparation} onChange={e=>setFormPlato(f=>({...f,preparation:e.target.value}))}/><button className="vf-primary" disabled={cargandoNutricion} onClick={guardarPlatoNutricion}>{cargandoNutricion?"GUARDANDO...":editandoPlatoId?"GUARDAR CAMBIOS":"PUBLICAR PLATO"}</button></div></section>}
 
-            {platoParaPlan && <div className="vf-plan-modal"><strong>📅 Añadir “{platoParaPlan.name}” al plan</strong><div className="vf-plan-modal-grid"><label className="vf-muted">Día<input className="vf-text" type="date" value={fechaPlanNutricion} onChange={e=>setFechaPlanNutricion(e.target.value)}/></label><label className="vf-muted">Momento<select className="vf-text" value={tipoPlanNutricion} onChange={e=>setTipoPlanNutricion(e.target.value as NutritionCategory)}><option value="desayuno">Desayuno</option><option value="comida">Comida</option><option value="snack">Merienda</option><option value="cena">Cena</option></select></label><div className="vf-meal-actions"><button className="vf-primary" onClick={añadirPlatoAlPlan}>AÑADIR</button><button className="vf-secondary" onClick={()=>setPlatoParaPlan(null)}>CANCELAR</button></div></div></div>}
+            {platoParaPlan && <div className="vf-plan-modal"><strong>📅 Añadir “{platoParaPlan.name}” al plan</strong><div className="vf-plan-modal-grid"><label className="vf-muted">Día<input className="vf-text" type="date" value={fechaPlanNutricion} onChange={e=>setFechaPlanNutricion(e.target.value)}/></label><label className="vf-muted">Momento<select className="vf-text" value={tipoPlanNutricion} onChange={e=>setTipoPlanNutricion(e.target.value as NutritionCategory)}><option value="comida">Comida</option><option value="cena">Cena</option></select></label><div className="vf-meal-actions"><button className="vf-primary" onClick={añadirPlatoAlPlan}>AÑADIR</button><button className="vf-secondary" onClick={()=>setPlatoParaPlan(null)}>CANCELAR</button></div></div></div>}
 
             {cargandoNutricion && <div className="vf-section-card">Cargando Nutrición...</div>}
-            {!cargandoNutricion && <div className="vf-nutrition-grid">{platosFiltradosNutricion.map(m=><article className={`vf-meal-card ${!m.published?"vf-unpublished":""}`} key={m.id}>{m.image_url?<img className="vf-meal-image" src={m.image_url} alt={m.name}/>:<div className="vf-meal-placeholder">🍽️</div>}<div className="vf-meal-body"><div style={{display:"flex",justifyContent:"space-between",gap:8}}><div><h3>{m.name}</h3>{m.description&&<div className="vf-muted">{m.description}</div>}</div>{!m.published&&<span className="vf-publish-chip">BORRADOR</span>}</div><div className="vf-meal-macros"><div><strong>{m.calories}</strong><small>KCAL</small></div><div><strong>{m.protein}g</strong><small>PROTEÍNA</small></div><div><strong>{m.carbs}g</strong><small>CARBOS</small></div><div><strong>{m.fats}g</strong><small>GRASAS</small></div></div><div className="vf-meal-actions"><button className="vf-primary" onClick={()=>prepararAñadirPlan(m)}>＋ AÑADIR AL PLAN</button><button className="vf-secondary" onClick={()=>setPlatoAbiertoId(platoAbiertoId===m.id?null:m.id)}>{platoAbiertoId===m.id?"OCULTAR":"VER RECETA"}</button>{esAdminNutricion&&<><button className="vf-secondary" onClick={()=>editarPlatoNutricion(m)}>✏️</button><button className="vf-danger" onClick={()=>borrarPlatoNutricion(m)}>🗑️</button></>}</div>{platoAbiertoId===m.id&&<div className="vf-meal-detail"><h4>Ingredientes</h4>{m.ingredients?.length?<ul>{m.ingredients.map((i,idx)=><li key={idx}>{i.cantidad&&<strong>{i.cantidad} · </strong>}{i.nombre}</li>)}</ul>:<div className="vf-muted">Sin ingredientes añadidos.</div>}<h4>Preparación</h4><div className="vf-meal-prep">{m.preparation||"Sin preparación añadida."}</div></div>}</div></article>)}</div>}
+            {!cargandoNutricion && <div className="vf-nutrition-grid">{platosFiltradosNutricion.map(m=><article className={`vf-meal-card ${!m.published?"vf-unpublished":""}`} key={m.id}>{m.image_url?<img className="vf-meal-image" src={m.image_url} alt={m.name}/>:<div className="vf-meal-placeholder">🍽️</div>}<div className="vf-meal-body"><div style={{display:"flex",justifyContent:"space-between",gap:8}}><div><h3>{m.name}</h3>{m.description&&<div className="vf-muted">{m.description}</div>}</div>{!m.published&&<span className="vf-publish-chip">BORRADOR</span>}</div><div className="vf-meal-macros"><div><strong>{m.calories}</strong><small>KCAL</small></div><div><strong>{m.protein}g</strong><small>PROTEÍNA</small></div><div><strong>{m.carbs}g</strong><small>CARBOS</small></div><div><strong>{m.fats}g</strong><small>GRASAS</small></div></div><div className="vf-meal-actions">{tieneNutricionPrivada && (m.category === "comida" || m.category === "cena") && <button className="vf-primary" onClick={()=>prepararAñadirPlan(m)}>＋ AÑADIR A NUESTRA SEMANA</button>}<button className="vf-secondary" onClick={()=>setPlatoAbiertoId(platoAbiertoId===m.id?null:m.id)}>{platoAbiertoId===m.id?"OCULTAR":"VER RECETA"}</button>{esAdminNutricion&&<><button className="vf-secondary" onClick={()=>editarPlatoNutricion(m)}>✏️</button><button className="vf-danger" onClick={()=>borrarPlatoNutricion(m)}>🗑️</button></>}</div>{platoAbiertoId===m.id&&<div className="vf-meal-detail"><h4>Ingredientes</h4>{m.ingredients?.length?<ul>{m.ingredients.map((i,idx)=><li key={idx}>{i.cantidad&&<strong>{i.cantidad} · </strong>}{i.nombre}</li>)}</ul>:<div className="vf-muted">Sin ingredientes añadidos.</div>}<h4>Preparación</h4><div className="vf-meal-prep">{m.preparation||"Sin preparación añadida."}</div></div>}</div></article>)}</div>}
             {!cargandoNutricion && !platosFiltradosNutricion.length && <div className="vf-section-card">Todavía no hay platos publicados en esta categoría.</div>}
           </>}
 
@@ -2907,11 +3006,11 @@ linear-gradient(180deg,rgba(18,12,15,.97),rgba(11,12,15,.98));backdrop-filter:bl
             </article>)}</div>
           </>}
 
-          {seccionNutricion === "plan" && <>
+          {seccionNutricion === "plan" && tieneNutricionPrivada && <>
             <button className="vf-secondary vf-back-nutrition" onClick={()=>setSeccionNutricion("inicio")}>← VOLVER A NUTRICIÓN</button>
-            <div className="vf-nutrition-hero"><div><div className="vf-eyebrow">NUTRICIÓN</div><h1>📅 Plan semanal</h1><p>Tu planificación personal. Solo tú puedes verla y modificarla.</p></div></div>
+            <div className="vf-nutrition-hero"><div><div className="vf-eyebrow">🔒 NUTRICIÓN PRIVADA</div><h1>📅 Nuestra semana</h1><p>Calendario compartido solo entre vosotros dos. Organizamos únicamente comida y cena.</p></div></div>
             <div className="vf-week-plan-head"><button className="vf-secondary" onClick={()=>moverSemanaNutricion(-1)}>‹ SEMANA ANTERIOR</button><div>{semanaNutricion.toLocaleDateString("es-ES",{day:"2-digit",month:"long"})} — {diasSemanaNutricion[6].toLocaleDateString("es-ES",{day:"2-digit",month:"long",year:"numeric"})}</div><button className="vf-secondary" onClick={()=>moverSemanaNutricion(1)}>SEMANA SIGUIENTE ›</button></div>
-            <div className="vf-meal-week">{diasSemanaNutricion.map((d)=>{const k=`${d.getFullYear()}-${String(d.getMonth()+1).padStart(2,"0")}-${String(d.getDate()).padStart(2,"0")}`;return <section className="vf-meal-day" key={k}><h4>{d.toLocaleDateString("es-ES",{weekday:"long"})}<span>{d.toLocaleDateString("es-ES",{day:"2-digit",month:"2-digit"})}</span></h4>{(["desayuno","comida","snack","cena"] as NutritionCategory[]).map(tipo=>{const items=planNutricion.filter(e=>e.plan_date===k&&e.meal_type===tipo);return <div className="vf-meal-slot" key={tipo}><small>{NUTRITION_LABELS[tipo].toUpperCase()}</small>{items.map(item=><div className="vf-plan-item" key={item.id}><span>{item.nutrition_meals?.name??"Plato"}</span><button onClick={()=>quitarDelPlan(item.id)}>✕</button></div>)}{!items.length&&<div className="vf-muted" style={{fontSize:8,marginTop:4}}>—</div>}</div>})}</section>})}</div>
+            <div className="vf-meal-week">{diasSemanaNutricion.map((d)=>{const k=`${d.getFullYear()}-${String(d.getMonth()+1).padStart(2,"0")}-${String(d.getDate()).padStart(2,"0")}`;return <section className="vf-meal-day" key={k}><h4>{d.toLocaleDateString("es-ES",{weekday:"long"})}<span>{d.toLocaleDateString("es-ES",{day:"2-digit",month:"2-digit"})}</span></h4>{(["comida","cena"] as NutritionCategory[]).map(tipo=>{const items=planNutricion.filter(e=>e.plan_date===k&&e.meal_type===tipo);return <div className="vf-meal-slot" key={tipo}><small>{NUTRITION_LABELS[tipo].toUpperCase()}</small>{items.map(item=><div className="vf-plan-item" key={item.id}><span>{item.nutrition_meals?.name??"Plato"}</span><button onClick={()=>quitarDelPlan(item.id)}>✕</button></div>)}{!items.length&&<div className="vf-muted" style={{fontSize:8,marginTop:4}}>—</div>}</div>})}</section>})}</div>
           </>}
         </>}
 
@@ -3029,15 +3128,19 @@ linear-gradient(180deg,rgba(18,12,15,.97),rgba(11,12,15,.98));backdrop-filter:bl
         </div>
       {mensaje&&<div className="vf-message" onClick={()=>setMensaje("")}>{mensaje}</div>}
       <nav className="vf-bottom">
-        <button className={`vf-nav ${vista==="inicio"?"active":""}`} onClick={()=>setVista("inicio")}><span>⌂</span>INICIO</button>
-        <button className={`vf-nav ${vista==="entreno"?"active":""}`} onClick={abrirEntrenamiento}><span>🏋️</span>ENTRENO</button>
-        <button className={`vf-nav ${vista==="historial"?"active":""}`} onClick={()=>setVista("historial")}><span>🕘</span>HISTORIAL</button>
-        <button className={`vf-nav ${vista==="progreso"?"active":""}`} onClick={()=>setVista("progreso")}><span>📈</span>PROGRESO</button>
-        <button className={`vf-nav ${vista==="rutinas"?"active":""}`} onClick={()=>setVista("rutinas")}><span>📋</span>RUTINAS</button>
-        <button className={`vf-nav ${vista==="biblioteca"?"active":""}`} onClick={()=>{setTargetBiblioteca(null);setVista("biblioteca")}}><span>📚</span>BIBLIOTECA</button>
+        {!esSoloNutricion && <>
+          <button className={`vf-nav ${vista==="inicio"?"active":""}`} onClick={()=>setVista("inicio")}><span>⌂</span>INICIO</button>
+          <button className={`vf-nav ${vista==="entreno"?"active":""}`} onClick={abrirEntrenamiento}><span>🏋️</span>ENTRENO</button>
+          <button className={`vf-nav ${vista==="historial"?"active":""}`} onClick={()=>setVista("historial")}><span>🕘</span>HISTORIAL</button>
+          <button className={`vf-nav ${vista==="progreso"?"active":""}`} onClick={()=>setVista("progreso")}><span>📈</span>PROGRESO</button>
+          <button className={`vf-nav ${vista==="rutinas"?"active":""}`} onClick={()=>setVista("rutinas")}><span>📋</span>RUTINAS</button>
+          <button className={`vf-nav ${vista==="biblioteca"?"active":""}`} onClick={()=>{setTargetBiblioteca(null);setVista("biblioteca")}}><span>📚</span>BIBLIOTECA</button>
+        </>}
         <button className={`vf-nav ${vista==="nutricion"?"active":""}`} onClick={()=>abrirNutricion("inicio")}><span>🍽️</span>NUTRICIÓN</button>
-        <button className={`vf-nav ${vista==="calendario"?"active":""}`} onClick={()=>setVista("calendario")}><span>📅</span>CALENDARIO</button>
-        <button className={`vf-nav ${vista==="ajustes"?"active":""}`} onClick={()=>setVista("ajustes")}><span>⚙️</span>AJUSTES</button>
+        {!esSoloNutricion && <>
+          <button className={`vf-nav ${vista==="calendario"?"active":""}`} onClick={()=>setVista("calendario")}><span>📅</span>CALENDARIO</button>
+          <button className={`vf-nav ${vista==="ajustes"?"active":""}`} onClick={()=>setVista("ajustes")}><span>⚙️</span>AJUSTES</button>
+        </>}
       </nav>
     </main>
   );
