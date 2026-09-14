@@ -126,6 +126,17 @@ type MealPlanEntry = {
   nutrition_meals?: NutritionMeal | null;
 };
 
+type ShoppingItem = {
+  id: string;
+  owner_id: string;
+  week_start: string;
+  name: string;
+  quantity: string | null;
+  checked: boolean;
+  manual: boolean;
+  item_key: string;
+};
+
 type Family = {
   musculo: string;
   patron: string;
@@ -754,9 +765,12 @@ async function cerrarSesion() {
   window.location.href = "/login";
 }
   const [vista, setVista] = useState<"inicio" | "entreno" | "historial" | "progreso" | "rutinas" | "biblioteca" | "nutricion" | "calendario" | "ajustes">("inicio");
-  const [seccionNutricion, setSeccionNutricion] = useState<"inicio" | NutritionCategory | "plan" | "proponer" | "pendientes">("inicio");
+  const [seccionNutricion, setSeccionNutricion] = useState<"inicio" | NutritionCategory | "plan" | "compra" | "proponer" | "pendientes">("inicio");
   const [platosNutricion, setPlatosNutricion] = useState<NutritionMeal[]>([]);
   const [planNutricion, setPlanNutricion] = useState<MealPlanEntry[]>([]);
+  const [listaCompra, setListaCompra] = useState<ShoppingItem[]>([]);
+  const [nuevoProductoCompra, setNuevoProductoCompra] = useState("");
+  const [nuevaCantidadCompra, setNuevaCantidadCompra] = useState("");
   const [cargandoNutricion, setCargandoNutricion] = useState(false);
   const [busquedaNutricion, setBusquedaNutricion] = useState("");
   const [platoAbiertoId, setPlatoAbiertoId] = useState<string | null>(null);
@@ -2125,8 +2139,8 @@ const planificarFecha = (fecha: Date) => {
     cargarNutricion();
   }, [userId, nutritionPrivateRole]);
 
-  const abrirNutricion = (seccion: "inicio" | NutritionCategory | "plan" | "proponer" | "pendientes" = "inicio") => {
-    if (seccion === "plan" && !tieneNutricionPrivada) {
+  const abrirNutricion = (seccion: "inicio" | NutritionCategory | "plan" | "compra" | "proponer" | "pendientes" = "inicio") => {
+    if ((seccion === "plan" || seccion === "compra") && !tieneNutricionPrivada) {
       setSeccionNutricion("inicio");
       setVista("nutricion");
       setMensaje("🔒 Este plan semanal es privado.");
@@ -2329,6 +2343,82 @@ const planificarFecha = (fecha: Date) => {
       .eq("user_id", NUTRITION_PLAN_OWNER_ID);
     if (error) { setMensaje(`❌ ${error.message}`); return; }
     await cargarNutricion();
+  };
+
+  const fechaISOlocal = (d: Date) => `${d.getFullYear()}-${String(d.getMonth()+1).padStart(2,"0")}-${String(d.getDate()).padStart(2,"0")}`;
+
+  const cargarListaCompra = async () => {
+    if (!tieneNutricionPrivada) return;
+    const weekStart = fechaISOlocal(semanaNutricion);
+    const { data, error } = await supabase
+      .from("nutrition_shopping_items")
+      .select("*")
+      .eq("owner_id", NUTRITION_PLAN_OWNER_ID)
+      .eq("week_start", weekStart)
+      .order("checked", { ascending: true })
+      .order("created_at", { ascending: true });
+    if (error) { setMensaje(`❌ ${error.message}`); return; }
+    setListaCompra((data ?? []) as ShoppingItem[]);
+  };
+
+  const sincronizarListaCompra = async () => {
+    if (!tieneNutricionPrivada) return;
+    const weekStart = fechaISOlocal(semanaNutricion);
+    const weekEnd = fechaISOlocal(diasSemanaNutricion[6]);
+    const entradas = planNutricion.filter(e => e.plan_date >= weekStart && e.plan_date <= weekEnd);
+    const existentes = new Map(listaCompra.map(i => [i.item_key, i]));
+    const agrupados = new Map<string, {name:string; cantidades:string[]}>();
+    for (const entrada of entradas) {
+      for (const ing of entrada.nutrition_meals?.ingredients ?? []) {
+        const name = (ing.nombre || "").trim();
+        if (!name) continue;
+        const key = slug(name);
+        const actual = agrupados.get(key) ?? { name, cantidades: [] };
+        if (ing.cantidad?.trim()) actual.cantidades.push(ing.cantidad.trim());
+        agrupados.set(key, actual);
+      }
+    }
+    const { error: borrarError } = await supabase
+      .from("nutrition_shopping_items").delete()
+      .eq("owner_id", NUTRITION_PLAN_OWNER_ID).eq("week_start", weekStart).eq("manual", false);
+    if (borrarError) { setMensaje(`❌ ${borrarError.message}`); return; }
+    const filas = Array.from(agrupados.entries()).map(([key, v]) => ({
+      owner_id: NUTRITION_PLAN_OWNER_ID, week_start: weekStart, name: v.name,
+      quantity: Array.from(new Set(v.cantidades)).join(" + ") || null,
+      checked: existentes.get(key)?.checked ?? false, manual: false, item_key: key,
+    }));
+    if (filas.length) {
+      const { error } = await supabase.from("nutrition_shopping_items").insert(filas);
+      if (error) { setMensaje(`❌ ${error.message}`); return; }
+    }
+    setMensaje("🛒 Lista actualizada desde Nuestra semana");
+    await cargarListaCompra();
+  };
+
+  const añadirProductoCompra = async () => {
+    const name = nuevoProductoCompra.trim();
+    if (!name || !tieneNutricionPrivada) return;
+    const weekStart = fechaISOlocal(semanaNutricion);
+    const itemKey = `manual-${slug(name)}-${Date.now()}`;
+    const { error } = await supabase.from("nutrition_shopping_items").insert({
+      owner_id: NUTRITION_PLAN_OWNER_ID, week_start: weekStart, name,
+      quantity: nuevaCantidadCompra.trim() || null, checked: false, manual: true, item_key: itemKey,
+    });
+    if (error) { setMensaje(`❌ ${error.message}`); return; }
+    setNuevoProductoCompra(""); setNuevaCantidadCompra("");
+    await cargarListaCompra();
+  };
+
+  const marcarProductoCompra = async (item: ShoppingItem) => {
+    const { error } = await supabase.from("nutrition_shopping_items").update({checked: !item.checked}).eq("id", item.id);
+    if (error) { setMensaje(`❌ ${error.message}`); return; }
+    setListaCompra(prev => prev.map(x => x.id === item.id ? {...x, checked: !x.checked} : x));
+  };
+
+  const borrarProductoCompra = async (id: string) => {
+    const { error } = await supabase.from("nutrition_shopping_items").delete().eq("id", id);
+    if (error) { setMensaje(`❌ ${error.message}`); return; }
+    setListaCompra(prev => prev.filter(x => x.id !== id));
   };
 
   const moverSemanaNutricion = (delta: number) => setSemanaNutricion((prev) => {
@@ -2963,7 +3053,7 @@ linear-gradient(180deg,rgba(18,12,15,.97),rgba(11,12,15,.98));backdrop-filter:bl
               <button className="vf-nutrition-cat" onClick={()=>setSeccionNutricion("snack")}><span>🍓</span><h3>Meriendas</h3><p>Opciones fáciles para media tarde.</p></button>
               <button className="vf-nutrition-cat" onClick={()=>setSeccionNutricion("cena")}><span>🌙</span><h3>Cenas</h3><p>Opciones para terminar el día.</p></button>
             </div>
-            {tieneNutricionPrivada && <div className="vf-nutrition-plan-card"><div><div className="vf-card-kicker">🔒 NUTRICIÓN PRIVADA</div><h3>📅 Nuestra semana</h3><p className="vf-muted">Plan compartido solo entre vosotros dos · comida y cena de lunes a domingo.</p></div><button className="vf-primary" onClick={()=>abrirNutricion("plan")}>ABRIR NUESTRA SEMANA</button></div>}
+            {tieneNutricionPrivada && <div className="vf-nutrition-plan-card"><div><div className="vf-card-kicker">🔒 NUTRICIÓN PRIVADA</div><h3>📅 Nuestra semana</h3><p className="vf-muted">Plan compartido solo entre vosotros dos · comida y cena de lunes a domingo.</p></div><div style={{display:"flex",gap:8,flexWrap:"wrap"}}><button className="vf-primary" onClick={()=>abrirNutricion("plan")}>ABRIR NUESTRA SEMANA</button><button className="vf-secondary" onClick={()=>{abrirNutricion("compra");setTimeout(cargarListaCompra,0)}}>🛒 LISTA DE LA COMPRA</button></div></div>}
           </>}
 
           {["desayuno","comida","snack","cena"].includes(seccionNutricion) && <>
@@ -3025,9 +3115,29 @@ linear-gradient(180deg,rgba(18,12,15,.97),rgba(11,12,15,.98));backdrop-filter:bl
             </article>)}</div>
           </>}
 
+          {seccionNutricion === "compra" && tieneNutricionPrivada && <>
+            <button className="vf-secondary vf-back-nutrition" onClick={()=>setSeccionNutricion("plan")}>← VOLVER A NUESTRA SEMANA</button>
+            <div className="vf-nutrition-hero"><div><div className="vf-eyebrow">🔒 COMPARTIDA</div><h1>🛒 Lista de la compra</h1><p>Ingredientes de las comidas y cenas de esta semana. Lo que marque uno, lo ve el otro.</p></div><button className="vf-primary" onClick={sincronizarListaCompra}>↻ ACTUALIZAR DESDE EL MENÚ</button></div>
+            <section className="vf-section-card">
+              <div className="vf-toolbar" style={{display:"grid",gridTemplateColumns:"2fr 1fr auto",gap:8}}>
+                <input className="vf-text" placeholder="Añadir producto (ej. leche)" value={nuevoProductoCompra} onChange={e=>setNuevoProductoCompra(e.target.value)}/>
+                <input className="vf-text" placeholder="Cantidad (opcional)" value={nuevaCantidadCompra} onChange={e=>setNuevaCantidadCompra(e.target.value)}/>
+                <button className="vf-primary" onClick={añadirProductoCompra}>＋ AÑADIR</button>
+              </div>
+              <div style={{marginTop:14,display:"grid",gap:8}}>
+                {listaCompra.map(item=><div key={item.id} style={{display:"grid",gridTemplateColumns:"auto 1fr auto",gap:10,alignItems:"center",padding:"11px 12px",border:"1px solid var(--line)",borderRadius:10,opacity:item.checked?.55:1}}>
+                  <input type="checkbox" checked={item.checked} onChange={()=>marcarProductoCompra(item)} style={{width:20,height:20}}/>
+                  <div style={{textDecoration:item.checked?"line-through":"none"}}><strong>{item.name}</strong>{item.quantity&&<span className="vf-muted"> · {item.quantity}</span>}{item.manual&&<small style={{display:"block",color:"#777"}}>Añadido manualmente</small>}</div>
+                  <button className="vf-danger" onClick={()=>borrarProductoCompra(item.id)}>🗑️</button>
+                </div>)}
+                {!listaCompra.length&&<div className="vf-muted">La lista está vacía. Pulsa “ACTUALIZAR DESDE EL MENÚ” para generar los ingredientes de esta semana.</div>}
+              </div>
+            </section>
+          </>}
+
           {seccionNutricion === "plan" && tieneNutricionPrivada && <>
             <button className="vf-secondary vf-back-nutrition" onClick={()=>setSeccionNutricion("inicio")}>← VOLVER A NUTRICIÓN</button>
-            <div className="vf-nutrition-hero"><div><div className="vf-eyebrow">🔒 NUTRICIÓN PRIVADA</div><h1>📅 Nuestra semana</h1><p>Calendario compartido solo entre vosotros dos. Organizamos únicamente comida y cena.</p></div></div>
+            <div className="vf-nutrition-hero"><div><div className="vf-eyebrow">🔒 NUTRICIÓN PRIVADA</div><h1>📅 Nuestra semana</h1><p>Calendario compartido solo entre vosotros dos. Organizamos únicamente comida y cena.</p></div><button className="vf-primary" onClick={()=>{setSeccionNutricion("compra");setTimeout(cargarListaCompra,0)}}>🛒 LISTA DE LA COMPRA</button></div>
             <div className="vf-week-plan-head"><button className="vf-secondary" onClick={()=>moverSemanaNutricion(-1)}>‹ SEMANA ANTERIOR</button><div>{semanaNutricion.toLocaleDateString("es-ES",{day:"2-digit",month:"long"})} — {diasSemanaNutricion[6].toLocaleDateString("es-ES",{day:"2-digit",month:"long",year:"numeric"})}</div><button className="vf-secondary" onClick={()=>moverSemanaNutricion(1)}>SEMANA SIGUIENTE ›</button></div>
             <div className="vf-meal-week">{diasSemanaNutricion.map((d)=>{const k=`${d.getFullYear()}-${String(d.getMonth()+1).padStart(2,"0")}-${String(d.getDate()).padStart(2,"0")}`;return <section className="vf-meal-day" key={k}><h4>{d.toLocaleDateString("es-ES",{weekday:"long"})}<span>{d.toLocaleDateString("es-ES",{day:"2-digit",month:"2-digit"})}</span></h4>{(["comida","cena"] as NutritionCategory[]).map(tipo=>{const items=planNutricion.filter(e=>e.plan_date===k&&e.meal_type===tipo);return <div className="vf-meal-slot" key={tipo}><small>{NUTRITION_LABELS[tipo].toUpperCase()}</small>{items.map(item=><div className="vf-plan-item" key={item.id}><span>{item.nutrition_meals?.name??"Plato"}</span><button onClick={()=>quitarDelPlan(item.id)}>✕</button></div>)}{!items.length&&<div className="vf-muted" style={{fontSize:8,marginTop:4}}>—</div>}</div>})}</section>})}</div>
           </>}
