@@ -2414,13 +2414,18 @@ const planificarFecha = (fecha: Date) => {
       meal_type: tipoPlanNutricion,
     });
     if (error) { setMensaje(`❌ ${error.message}`); return; }
-    setMensaje(`✅ ${platoParaPlan.name} añadido a Nuestra semana`);
+    const nombreAñadido = platoParaPlan.name;
+    const semanaAñadida = inicioSemanaDesdeFecha(fechaPlanNutricion);
     setPlatoParaPlan(null);
     await cargarNutricion();
+    await sincronizarListaCompra(semanaAñadida, false);
+    setMensaje(`✅ ${nombreAñadido} añadido · ingredientes enviados a la lista 🛒`);
   };
 
   const quitarDelPlan = async (id: string) => {
     if (!tieneNutricionPrivada) return;
+    const entrada = planNutricion.find((item) => item.id === id);
+    const semanaAfectada = inicioSemanaDesdeFecha(entrada?.plan_date ?? semanaNutricion);
     const { error } = await supabase
       .from("user_meal_plan")
       .delete()
@@ -2428,13 +2433,49 @@ const planificarFecha = (fecha: Date) => {
       .eq("user_id", NUTRITION_PLAN_OWNER_ID);
     if (error) { setMensaje(`❌ ${error.message}`); return; }
     await cargarNutricion();
+    await sincronizarListaCompra(semanaAfectada, false);
+    setMensaje("🗑️ Plato quitado · lista de compra recalculada");
   };
 
   const fechaISOlocal = (d: Date) => `${d.getFullYear()}-${String(d.getMonth()+1).padStart(2,"0")}-${String(d.getDate()).padStart(2,"0")}`;
 
-  const cargarListaCompra = async () => {
+  const inicioSemanaDesdeFecha = (fecha: string | Date) => {
+    const d = typeof fecha === "string" ? new Date(`${fecha}T12:00:00`) : new Date(fecha);
+    const day = (d.getDay() + 6) % 7;
+    d.setDate(d.getDate() - day);
+    d.setHours(0,0,0,0);
+    return d;
+  };
+
+  // Suma cantidades sencillas de una misma receta/producto: 200 g + 300 g = 500 g,
+  // 1 kg + 500 g = 1500 g, 1 l + 250 ml = 1250 ml, 1 ud + 2 uds = 3 uds.
+  const combinarCantidadesCompra = (cantidades: string[]) => {
+    const limpias = cantidades.map(x => (x || "").trim()).filter(Boolean);
+    if (!limpias.length) return null;
+
+    const grupos = new Map<string, number>();
+    const libres: string[] = [];
+    for (const original of limpias) {
+      const texto = original.toLowerCase().replace(",", ".").trim();
+      const match = texto.match(/^(\d+(?:\.\d+)?)\s*(kg|g|ml|l|ud|uds|unidad|unidades)?\.?$/i);
+      if (!match) { libres.push(original); continue; }
+      let valor = Number(match[1]);
+      let unidad = (match[2] || "uds").toLowerCase();
+      if (unidad === "kg") { valor *= 1000; unidad = "g"; }
+      if (unidad === "l") { valor *= 1000; unidad = "ml"; }
+      if (["ud","uds","unidad","unidades"].includes(unidad)) unidad = "uds";
+      grupos.set(unidad, (grupos.get(unidad) ?? 0) + valor);
+    }
+
+    const sumadas = Array.from(grupos.entries()).map(([unidad, valor]) =>
+      `${Number.isInteger(valor) ? valor : Number(valor.toFixed(2))} ${unidad}`
+    );
+    return [...sumadas, ...Array.from(new Set(libres))].join(" + ") || null;
+  };
+
+  const cargarListaCompra = async (semana: Date = semanaNutricion) => {
     if (!tieneNutricionPrivada) return;
-    const weekStart = fechaISOlocal(semanaNutricion);
+    const weekStart = fechaISOlocal(semana);
     const { data, error } = await supabase
       .from("nutrition_shopping_items")
       .select("*")
@@ -2449,39 +2490,104 @@ const planificarFecha = (fecha: Date) => {
     })));
   };
 
-  const sincronizarListaCompra = async () => {
-    if (!tieneNutricionPrivada) return;
+  // Mantiene la lista compartida sincronizada en tiempo real entre los dos usuarios.
+  // Cualquier INSERT / UPDATE / DELETE de la lista vuelve a cargar la semana visible.
+  useEffect(() => {
+    if (!tieneNutricionPrivada || !userId) return;
+
     const weekStart = fechaISOlocal(semanaNutricion);
-    const weekEnd = fechaISOlocal(diasSemanaNutricion[6]);
-    const entradas = planNutricion.filter(e => e.plan_date >= weekStart && e.plan_date <= weekEnd);
-    const existentes = new Map(listaCompra.map(i => [i.item_key, i]));
+    const canal = supabase
+      .channel(`nutrition-shopping-${NUTRITION_PLAN_OWNER_ID}-${weekStart}`)
+      .on(
+        "postgres_changes",
+        {
+          event: "*",
+          schema: "public",
+          table: "nutrition_shopping_items",
+          filter: `owner_id=eq.${NUTRITION_PLAN_OWNER_ID}`,
+        },
+        (payload) => {
+          const fila = (payload.new && Object.keys(payload.new).length ? payload.new : payload.old) as Partial<ShoppingItem>;
+          // Ignoramos cambios de otras semanas del mismo hogar.
+          if (fila.week_start && fila.week_start !== weekStart) return;
+          void cargarListaCompra(semanaNutricion);
+        }
+      )
+      .subscribe();
+
+    return () => {
+      void supabase.removeChannel(canal);
+    };
+  }, [supabase, userId, tieneNutricionPrivada, semanaNutricion]);
+
+  // Recalcula la compra directamente desde Supabase. Así funciona incluso justo después
+  // de añadir/quitar una receta, sin depender de que React haya actualizado planNutricion.
+  const sincronizarListaCompra = async (semanaObjetivo: Date = semanaNutricion, mostrarMensaje = true) => {
+    if (!tieneNutricionPrivada) return;
+    const inicio = inicioSemanaDesdeFecha(semanaObjetivo);
+    const fin = new Date(inicio);
+    fin.setDate(fin.getDate() + 6);
+    const weekStart = fechaISOlocal(inicio);
+    const weekEnd = fechaISOlocal(fin);
+
+    const { data: entradasData, error: planError } = await supabase
+      .from("user_meal_plan")
+      .select("id,user_id,meal_id,plan_date,meal_type,nutrition_meals(*)")
+      .eq("user_id", NUTRITION_PLAN_OWNER_ID)
+      .gte("plan_date", weekStart)
+      .lte("plan_date", weekEnd)
+      .in("meal_type", ["comida", "cena"]);
+    if (planError) { setMensaje(`❌ ${planError.message}`); return; }
+
+    const { data: actualesData, error: actualesError } = await supabase
+      .from("nutrition_shopping_items")
+      .select("*")
+      .eq("owner_id", NUTRITION_PLAN_OWNER_ID)
+      .eq("week_start", weekStart);
+    if (actualesError) { setMensaje(`❌ ${actualesError.message}`); return; }
+
+    const actuales = (actualesData ?? []) as ShoppingItem[];
+    const autoExistentes = new Map(actuales.filter(i => !i.manual).map(i => [i.item_key, i]));
     const agrupados = new Map<string, {name:string; cantidades:string[]}>();
-    for (const entrada of entradas) {
+
+    for (const entrada of (entradasData ?? []) as any[]) {
       for (const ing of entrada.nutrition_meals?.ingredients ?? []) {
-        const name = (ing.nombre || "").trim();
+        const name = String(ing.nombre || "").trim();
         if (!name) continue;
         const key = slug(name);
         const actual = agrupados.get(key) ?? { name, cantidades: [] };
-        if (ing.cantidad?.trim()) actual.cantidades.push(ing.cantidad.trim());
+        if (String(ing.cantidad || "").trim()) actual.cantidades.push(String(ing.cantidad).trim());
         agrupados.set(key, actual);
       }
     }
+
     const { error: borrarError } = await supabase
-      .from("nutrition_shopping_items").delete()
-      .eq("owner_id", NUTRITION_PLAN_OWNER_ID).eq("week_start", weekStart).eq("manual", false);
+      .from("nutrition_shopping_items")
+      .delete()
+      .eq("owner_id", NUTRITION_PLAN_OWNER_ID)
+      .eq("week_start", weekStart)
+      .eq("manual", false);
     if (borrarError) { setMensaje(`❌ ${borrarError.message}`); return; }
+
     const filas = Array.from(agrupados.entries()).map(([key, v]) => ({
-      owner_id: NUTRITION_PLAN_OWNER_ID, week_start: weekStart, name: v.name,
-      quantity: Array.from(new Set(v.cantidades)).join(" + ") || null,
-      checked: existentes.get(key)?.checked ?? false, manual: false, item_key: key,
+      owner_id: NUTRITION_PLAN_OWNER_ID,
+      week_start: weekStart,
+      name: v.name,
+      quantity: combinarCantidadesCompra(v.cantidades),
+      checked: autoExistentes.get(key)?.checked ?? false,
+      manual: false,
+      item_key: key,
       category: inferShoppingCategory(v.name),
     }));
+
     if (filas.length) {
       const { error } = await supabase.from("nutrition_shopping_items").insert(filas);
       if (error) { setMensaje(`❌ ${error.message}`); return; }
     }
-    setMensaje("🛒 Lista actualizada desde Nuestra semana");
-    await cargarListaCompra();
+
+    // Solo actualizamos la lista visible si estamos mirando esa misma semana.
+    if (fechaISOlocal(inicioSemanaDesdeFecha(semanaNutricion)) === weekStart) await cargarListaCompra(inicio);
+    if (mostrarMensaje) setMensaje("🛒 Lista actualizada automáticamente desde Nuestra semana");
   };
 
   const añadirProductoCompra = async () => {
@@ -2515,10 +2621,17 @@ const planificarFecha = (fecha: Date) => {
     if (!tieneNutricionPrivada) return;
     const weekStart = fechaISOlocal(semanaNutricion);
     const key = `catalog-${slug(name)}`;
-    const existente = listaCompra.find((item) => item.item_key === key);
+    const catalogo = listaCompra.find((item) => item.item_key === key);
+    const automatico = listaCompra.find((item) => !item.manual && slug(item.name) === slug(name));
+
+    // Si la receta ya lo necesita, el botón actúa directamente sobre ese ingrediente.
+    if (!catalogo && automatico) {
+      await marcarProductoCompra(automatico);
+      return;
+    }
 
     // ○ No necesito -> 🛒 Coger
-    if (!existente) {
+    if (!catalogo) {
       const { error } = await supabase.from("nutrition_shopping_items").insert({
         owner_id: NUTRITION_PLAN_OWNER_ID, week_start: weekStart, name, quantity: null,
         checked: false, manual: true, item_key: key, category,
@@ -2529,22 +2642,24 @@ const planificarFecha = (fecha: Date) => {
     }
 
     // 🛒 Coger -> ✓ Comprado
-    if (!existente.checked) {
-      const { error } = await supabase.from("nutrition_shopping_items").update({ checked: true }).eq("id", existente.id);
+    if (!catalogo.checked) {
+      const { error } = await supabase.from("nutrition_shopping_items").update({ checked: true }).eq("id", catalogo.id);
       if (error) { setMensaje(`❌ ${error.message}`); return; }
-      setListaCompra((prev) => prev.map((item) => item.id === existente.id ? { ...item, checked: true } : item));
+      setListaCompra((prev) => prev.map((item) => item.id === catalogo.id ? { ...item, checked: true } : item));
       return;
     }
 
     // ✓ Comprado -> ○ No necesito
-    await borrarProductoCompra(existente.id);
+    await borrarProductoCompra(catalogo.id);
   };
 
   const estadoProductoCatalogo = (name: string) => {
-    const item = listaCompra.find((x) => x.item_key === `catalog-${slug(name)}`);
-    if (!item) return { label: "○ No necesito", state: "none" as const };
-    if (item.checked) return { label: "✓ Comprado", state: "done" as const };
-    return { label: "🛒 Coger", state: "take" as const };
+    const catalogo = listaCompra.find((x) => x.item_key === `catalog-${slug(name)}`);
+    const automatico = listaCompra.find((x) => !x.manual && slug(x.name) === slug(name));
+    const item = catalogo ?? automatico;
+    if (!item) return { label: "○ No necesito", state: "none" as const, quantity: null as string | null };
+    if (item.checked) return { label: "✓ Comprado", state: "done" as const, quantity: item.quantity ?? null };
+    return { label: "🛒 Coger", state: "take" as const, quantity: item.quantity ?? null };
   };
 
   const moverSemanaNutricion = (delta: number) => setSemanaNutricion((prev) => {
@@ -3247,7 +3362,7 @@ linear-gradient(180deg,rgba(18,12,15,.97),rgba(11,12,15,.98));backdrop-filter:bl
 
           {seccionNutricion === "compra" && tieneNutricionPrivada && <>
             <button className="vf-secondary vf-back-nutrition" onClick={()=>setSeccionNutricion("plan")}>← VOLVER A NUESTRA SEMANA</button>
-            <div className="vf-nutrition-hero"><div><div className="vf-eyebrow">🔒 COMPARTIDA</div><h1>🛒 Lista de la compra</h1><p>Elige lo que necesitáis y, en la tienda, márcalo como comprado. Los dos veis el mismo estado.</p></div><button className="vf-primary" onClick={sincronizarListaCompra}>↻ AÑADIR INGREDIENTES DEL MENÚ</button></div>
+            <div className="vf-nutrition-hero"><div><div className="vf-eyebrow">🔒 COMPARTIDA</div><h1>🛒 Lista de la compra</h1><p>Las recetas de Nuestra semana añaden sus ingredientes automáticamente. Los dos veis el mismo estado.</p></div><button className="vf-primary" onClick={()=>sincronizarListaCompra()}>↻ RECALCULAR LISTA</button></div>
 
             <section className="vf-section-card">
               <div className="vf-card-kicker">AÑADIR PRODUCTO PERSONALIZADO</div>
@@ -3274,7 +3389,7 @@ linear-gradient(180deg,rgba(18,12,15,.97),rgba(11,12,15,.98));backdrop-filter:bl
                       const estado = estadoProductoCatalogo(product);
                       return <button key={product} onClick={()=>cambiarEstadoProductoCatalogo(product,cat.id)} style={{textAlign:"left",padding:"12px",borderRadius:10,border:estado.state==="done"?"1px solid rgba(49,210,124,.5)":estado.state==="take"?"1px solid rgba(255,48,74,.45)":"1px solid var(--line)",background:estado.state==="done"?"rgba(49,210,124,.08)":estado.state==="take"?"rgba(255,48,74,.08)":"#101217",color:"#fff",cursor:"pointer"}}>
                         <strong style={{display:"block",marginBottom:5,textDecoration:estado.state==="done"?"line-through":"none"}}>{product}</strong>
-                        <small style={{color:estado.state==="done"?"#31d27c":estado.state==="take"?"var(--red)":"#777"}}>{estado.label}</small>
+                        <small style={{color:estado.state==="done"?"#31d27c":estado.state==="take"?"var(--red)":"#777"}}>{estado.quantity ? `${estado.quantity} · ` : ""}{estado.label}</small>
                       </button>;
                     })}
                     {extras.map((item) => <div key={item.id} style={{display:"grid",gridTemplateColumns:"1fr auto",gap:8,alignItems:"center",padding:"12px",border:"1px solid var(--line)",borderRadius:10,background:"#101217",opacity:item.checked?.6:1}}>
