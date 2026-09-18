@@ -2,7 +2,6 @@
 
 import { useEffect, useMemo, useState } from "react";
 import { useRouter } from "next/navigation";
-import { FIT3D_EXERCISES } from "./fit3d-exercises";
 
 
 
@@ -29,8 +28,6 @@ type LibraryExercise = {
   equipo: string;
   tipo: "Compuesto" | "Aislamiento";
   icono: string;
-  demo_url?: string;
-  image_url?: string;
 };
 
 type RoutineExercise = {
@@ -533,18 +530,6 @@ const BASE_LIBRARY: LibraryExercise[] = FAMILIAS.flatMap((f) =>
     equipo,
     tipo: f.tipo,
     icono: f.icono,
-    demo_url: ({
-      "Press Banca": "https://gfklswkapmhumpjkgvao.supabase.co/storage/v1/object/public/exercise-demos/01-press-banca.mp4",
-      "Press Inclinado con Barra": "https://gfklswkapmhumpjkgvao.supabase.co/storage/v1/object/public/exercise-demos/02-press-inclinado-barra.mp4",
-      "Elevaciones Laterales Mancuernas": "https://gfklswkapmhumpjkgvao.supabase.co/storage/v1/object/public/exercise-demos/03-elevaciones-laterales.mp4",
-      "Tríceps Barra V": "https://gfklswkapmhumpjkgvao.supabase.co/storage/v1/object/public/exercise-demos/04-triceps-polea-v.mp4",
-      "Press Inclinado Mancuernas": "https://gfklswkapmhumpjkgvao.supabase.co/storage/v1/object/public/exercise-demos/05-press-inclinado-mancuernas.mp4",
-      "Jalón al Pecho Agarre Ancho": "https://gfklswkapmhumpjkgvao.supabase.co/storage/v1/object/public/exercise-demos/06-jalon-al-pecho.mp4",
-      "Remo Cable Sentado": "https://gfklswkapmhumpjkgvao.supabase.co/storage/v1/object/public/exercise-demos/07-remo-sentado-polea.mp4",
-      "Curl Inclinado": "https://gfklswkapmhumpjkgvao.supabase.co/storage/v1/object/public/exercise-demos/08-curl-biceps-inclinado.mp4",
-      "Búlgara": "https://gfklswkapmhumpjkgvao.supabase.co/storage/v1/object/public/exercise-demos/09-sentadilla-bulgara.mp4",
-      "Hip Thrust Barra": "https://gfklswkapmhumpjkgvao.supabase.co/storage/v1/object/public/exercise-demos/10-hip-thrust-barra.mp4",
-    } as Record<string, string>)[nombre],
   }))
 );
 
@@ -578,76 +563,8 @@ const reglaValida = (e: LibraryExercise, reglaId: string) => {
 };
 
 
-// Vídeos Fit3D SOLO cuando la equivalencia es suficientemente clara.
-// Importante: NO asignamos un vídeo solo por compartir el mismo patrón,
-// porque eso provocaba errores como "Press Pecho Polea" mostrando press banca con barra.
-// Los vídeos subidos manualmente por ti siempre tienen prioridad.
-const FIT3D_VIDEO_BY_ID: Map<number, string> = new Map(
-  FIT3D_EXERCISES.map((e) => [Number(e.fit3d_id), e.demo_url] as [number, string])
-);
-
-const DEMO_FIT3D_POR_EJERCICIO: Record<string, number> = {
-  // PECHO - inclinados
-  "Press Inclinado Multipower": 461,
-  "Press Inclinado Máquina": 450,
-  "Press Inclinado Polea": 422,
-
-  // PECHO - horizontales
-  "Press Plano Mancuernas": 434,
-  "Press Plano Multipower": 460,
-  "Press Pecho Polea": 403,
-  "Flexiones": 456,
-
-  // PECHO - declinados
-  "Press Declinado Barra": 389,
-  "Press Declinado Mancuernas": 436,
-  "Press Declinado Multipower": 459,
-  "Press Declinado Máquina": 449,
-  "Fondos Pecho": 415,
-  "Fondos Pecho Asistidos": 413,
-
-  // PECHO - aperturas / cruces
-  "Cruce de Poleas Medio": 404,
-  "Cruce de Poleas Bajo a Alto": 409,
-  "Pec Deck": 453,
-
-  // Otros emparejamientos claros
-  "Encogimientos Barra": 485,
-  "Elevaciones Laterales Mancuernas": 543,
-};
-
-const BASE_LIBRARY_CON_VIDEOS: LibraryExercise[] = BASE_LIBRARY.map((e) => {
-  const fit3dId = DEMO_FIT3D_POR_EJERCICIO[e.nombre];
-  return {
-    ...e,
-    demo_url: e.demo_url ?? (fit3dId ? FIT3D_VIDEO_BY_ID.get(fit3dId) : undefined),
-  };
-});
-
-const BUILTIN_LIBRARY: LibraryExercise[] = (() => {
-  // Conservamos los ejercicios base de tus rutinas actuales y añadimos
-  // los 853 ejercicios reales de Fit3D. Ya no generamos variantes artificiales.
-  const salida: LibraryExercise[] = [...BASE_LIBRARY_CON_VIDEOS];
-  const usados = new Set(salida.map((e) => e.nombre.toLowerCase()));
-
-  for (const fit of FIT3D_EXERCISES) {
-    if (usados.has(fit.nombre.toLowerCase())) continue;
-    usados.add(fit.nombre.toLowerCase());
-    salida.push({
-      id: fit.id,
-      nombre: fit.nombre,
-      musculo: fit.musculo,
-      patron: fit.patron,
-      equipo: fit.equipo,
-      tipo: fit.tipo,
-      icono: fit.icono,
-      demo_url: fit.demo_url,
-      image_url: fit.image_url,
-    });
-  }
-
-  return salida;
-})();
+// Biblioteca integrada de VitorFit, sin archivos multimedia externos.
+const BUILTIN_LIBRARY: LibraryExercise[] = BASE_LIBRARY;
 
 const libByName = (nombre: string) => BUILTIN_LIBRARY.find((e) => e.nombre === nombre) ?? BUILTIN_LIBRARY[0];
 
@@ -883,7 +800,6 @@ async function cerrarSesion() {
   const [filtroMusculo, setFiltroMusculo] = useState("Todos");
   const [filtroPatron, setFiltroPatron] = useState("Todos");
   const [filtroEquipo, setFiltroEquipo] = useState("Todos");
-  const [demosAbiertas, setDemosAbiertas] = useState<Record<string, boolean>>({});
   const [targetBiblioteca, setTargetBiblioteca] = useState<{ rutinaId: string; diaId: string } | null>(null);
   const [añadiendoSoloHoy, setAñadiendoSoloHoy] = useState(false);
   const [extrasSesion, setExtrasSesion] = useState<RoutineExercise[]>([]);
@@ -3248,19 +3164,6 @@ linear-gradient(180deg,rgba(18,12,15,.97),rgba(11,12,15,.98));backdrop-filter:bl
                 <AnatomiaPro id={ex.id} musculo={ex.musculo} patron={ex.patron} nombre={ex.nombre} compact />
               </div>
               <div className="vf-lib-meta">💪 {ex.musculo}<br/>🎯 {ex.patron}<br/>⚙️ {ex.equipo} · {ex.tipo}</div>
-              {ex.image_url&&<div className="vf-demo-wrap" style={{marginTop:12}}><img className="vf-demo-video" src={ex.image_url} alt={`Imagen de ${ex.nombre}`} loading="lazy" /></div>}
-              {ex.demo_url&&<details className="vf-demo" onToggle={(e)=>{
-                const abierto=(e.currentTarget as HTMLDetailsElement).open;
-                setDemosAbiertas(prev=>({...prev,[ex.id]:abierto}));
-              }}>
-                <summary>🎬 VER DEMOSTRACIÓN EN MOVIMIENTO</summary>
-                {demosAbiertas[ex.id]&&<div className="vf-demo-wrap">
-                  {ex.demo_url.toLowerCase().endsWith(".gif")
-                    ? <img className="vf-demo-video" src={ex.demo_url} alt={`Demostración de ${ex.nombre}`} loading="lazy" />
-                    : <video className="vf-demo-video" src={ex.demo_url} autoPlay loop muted playsInline preload="none" controls/>}
-                  <div className="vf-demo-label"><span className="vf-demo-live">● DEMO VITORFIT</span><span>Reproducción en bucle</span></div>
-                </div>}
-              </details>}
               {(()=>{const tec=tecnicaEjercicio(ex);return <details className="vf-technique"><summary>▶ CÓMO HACERLO CORRECTAMENTE</summary><div className="vf-technique-grid"><div className="vf-technique-box"><h4>✅ Técnica</h4><ul>{tec.pasos.map((x,i)=><li key={i}>{x}</li>)}</ul></div><div className="vf-technique-box"><h4>⚠️ Errores comunes</h4><ul>{tec.errores.map((x,i)=><li key={i}>{x}</li>)}</ul></div></div><div className="vf-technique-tip"><strong>💡 Consejo:</strong> {tec.consejo}</div></details>})()}
               <details className="vf-anatomy-edit" open={editorAnatomiaId===ex.id} onToggle={(e)=>{if((e.currentTarget as HTMLDetailsElement).open)setEditorAnatomiaId(ex.id);else if(editorAnatomiaId===ex.id)setEditorAnatomiaId(null)}}>
                 <summary>✏️ EDITAR ANATOMÍA</summary>
