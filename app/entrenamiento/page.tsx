@@ -171,7 +171,7 @@ const FAMILIAS: Family[] = [
     musculo: "Pecho superior", patron: "Empuje inclinado", tipo: "Compuesto", icono: "🏋️",
     ejercicios: [
       ["Press Inclinado con Barra", "Barra"], ["Press Inclinado Multipower", "Multipower"],
-      ["Press Inclinado Mancuernas", "Mancuernas"], ["Press Inclinado Máquina", "Máquina"],
+      ["Press Inclinado con Mancuernas", "Mancuernas"], ["Press Inclinado Máquina", "Máquina"],
       ["Press Inclinado Hammer Strength", "Máquina"], ["Press Inclinado Convergente", "Máquina"],
       ["Press Inclinado Polea", "Polea"], ["Press Inclinado Unilateral Máquina", "Máquina"],
     ],
@@ -197,14 +197,14 @@ const FAMILIAS: Family[] = [
     musculo: "Pecho", patron: "Aducción horizontal", tipo: "Aislamiento", icono: "🎯",
     ejercicios: [
       ["Cruce de Poleas Medio", "Polea"], ["Cruce de Poleas Bajo a Alto", "Polea"], ["Cruce de Poleas Alto a Bajo", "Polea"],
-      ["Cruce Polea Unilateral", "Polea"], ["Pec Deck", "Máquina"], ["Aperturas Mancuernas", "Mancuernas"],
+      ["Cruce Polea Unilateral", "Polea"], ["Pec Deck / Contractora", "Máquina"], ["Aperturas Mancuernas", "Mancuernas"],
       ["Aperturas Inclinadas Mancuernas", "Mancuernas"], ["Aperturas Máquina", "Máquina"],
     ],
   },
   {
     musculo: "Dorsal", patron: "Tracción vertical", tipo: "Compuesto", icono: "🧗",
     ejercicios: [
-      ["Jalón al Pecho Agarre Ancho", "Polea"], ["Jalón al Pecho Agarre Neutro", "Polea"],
+      ["Jalón al Pecho Agarre Ancho", "Polea"], ["Jalón al Pecho Agarre Cerrado", "Polea"],
       ["Jalón al Pecho Agarre Supino", "Polea"], ["Jalón Unilateral", "Polea"], ["Jalón Máquina", "Máquina"],
       ["Dominadas", "Peso corporal"], ["Dominadas Asistidas", "Máquina"], ["Dominadas Neutras", "Peso corporal"],
       ["Dominadas Supinas", "Peso corporal"], ["Dominadas Lastradas", "Peso corporal"],
@@ -213,7 +213,7 @@ const FAMILIAS: Family[] = [
   {
     musculo: "Espalda media", patron: "Tracción horizontal", tipo: "Compuesto", icono: "🚣",
     ejercicios: [
-      ["Remo T", "Barra"], ["Remo T Pecho Apoyado", "Máquina"], ["Remo Barra", "Barra"], ["Remo Pendlay", "Barra"],
+      ["Remo T", "Barra"], ["Remo T con Pecho Apoyado", "Máquina"], ["Remo Barra", "Barra"], ["Remo Pendlay", "Barra"],
       ["Remo Máquina", "Máquina"], ["Remo Máquina Convergente", "Máquina"], ["Remo Cable Sentado", "Polea"],
       ["Remo Pecho Apoyado Mancuernas", "Mancuernas"], ["Remo Multipower", "Multipower"],
     ],
@@ -251,7 +251,7 @@ const FAMILIAS: Family[] = [
     musculo: "Hombro lateral", patron: "Abducción de hombro", tipo: "Aislamiento", icono: "🪽",
     ejercicios: [
       ["Elevaciones Laterales Mancuernas", "Mancuernas"], ["Elevación Lateral Polea", "Polea"],
-      ["Elevación Lateral Máquina", "Máquina"], ["Elevación Lateral Unilateral Polea", "Polea"],
+      ["Elevaciones Laterales en Máquina", "Máquina"], ["Elevación Lateral Unilateral Polea", "Polea"],
       ["Elevación Lateral Sentado", "Mancuernas"], ["Elevación Lateral Lean Away", "Polea"],
       ["Elevación Lateral Máquina Unilateral", "Máquina"],
     ],
@@ -259,7 +259,7 @@ const FAMILIAS: Family[] = [
   {
     musculo: "Hombro posterior", patron: "Abducción horizontal", tipo: "Aislamiento", icono: "🪽",
     ejercicios: [
-      ["Pájaros Mancuernas", "Mancuernas"], ["Reverse Pec Deck", "Máquina"], ["Face Pull", "Polea"],
+      ["Pájaros Mancuernas", "Mancuernas"], ["Deltoide Posterior en Máquina", "Máquina"], ["Face Pull", "Polea"],
       ["Pájaros Polea", "Polea"], ["Reverse Fly Polea Unilateral", "Polea"], ["Pájaros Banco Inclinado", "Mancuernas"],
     ],
   },
@@ -308,7 +308,7 @@ const FAMILIAS: Family[] = [
   {
     musculo: "Tríceps", patron: "Extensión de codo", tipo: "Aislamiento", icono: "🔥",
     ejercicios: [
-      ["Tríceps Polea Cuerda", "Polea"], ["Tríceps Barra V", "Polea"], ["Tríceps Barra Recta", "Polea"],
+      ["Tríceps Polea Cuerda", "Polea"], ["Tríceps con Barra V", "Polea"], ["Tríceps Barra Recta", "Polea"],
       ["Tríceps Polea Unilateral", "Polea"], ["Pressdown Agarre Inverso", "Polea"], ["Tríceps Máquina", "Máquina"],
     ],
   },
@@ -316,7 +316,7 @@ const FAMILIAS: Family[] = [
     musculo: "Tríceps cabeza larga", patron: "Extensión de codo sobre cabeza", tipo: "Aislamiento", icono: "⚡",
     ejercicios: [
       ["Tríceps Overhead Cuerda", "Polea"], ["Extensión Overhead Barra", "Polea"], ["Extensión Mancuerna Sobre Cabeza", "Mancuernas"],
-      ["Extensión Francesa Barra Z", "Barra"], ["Skull Crushers", "Barra"], ["Overhead Unilateral Polea", "Polea"],
+      ["Extensión Francesa Inclinada con Barra Z", "Barra"], ["Skull Crushers", "Barra"], ["Overhead Unilateral Polea", "Polea"],
     ],
   },
   {
@@ -597,7 +597,7 @@ const DEFAULT_ROUTINES: Routine[] = [
           rx("d1-press-plano", "Press Plano Mancuernas", 3, "8-10", "1-2"),
           rx("d1-cruce-polea", "Cruce de Poleas Medio", 3, "10-15", "1-2"),
           rx("d1-laterales", "Elevación Lateral Polea", 3, "12-20", "1-2"),
-          rx("d1-triceps-polea", "Tríceps Barra V", 3, "10-15", "1-2"),
+          rx("d1-triceps-polea", "Tríceps con Barra V", 3, "10-15", "1-2"),
           rx("d1-triceps-overhead", "Tríceps Overhead Cuerda", 3, "10-15", "1-2"),
           rx("d1-press-hombro", "Press Hombro Máquina", 3, "8-12", "1-2"),
         ],
@@ -605,13 +605,13 @@ const DEFAULT_ROUTINES: Routine[] = [
       {
         id: "dia-2", titulo: "DÍA 2", subtitulo: "Espalda · Bíceps · Hombro posterior",
         ejercicios: [
-          rx("d2-jalon", "Jalón al Pecho Agarre Neutro", 3, "8-12", "1-2"),
+          rx("d2-jalon", "Jalón al Pecho Agarre Cerrado", 3, "8-12", "1-2"),
           rx("d2-remo-t", "Remo T", 3, "8-12", "1-2"),
           rx("d2-remo-unilateral", "Remo Cable 1 Mano", 3, "10-12", "1-2"),
           rx("d2-jalon-rectos", "Jalón Brazos Rectos", 3, "12-15", "1-2"),
           rx("d2-curl-inclinado", "Curl Inclinado", 3, "8-12", "1-2"),
           rx("d2-curl-predicador", "Curl Predicador Barra Z", 3, "10-15", "1-2"),
-          rx("d2-posterior", "Reverse Pec Deck", 3, "12-20", "1-2"),
+          rx("d2-posterior", "Deltoide Posterior en Máquina", 3, "12-20", "1-2"),
         ],
       },
       {
@@ -644,37 +644,37 @@ const DEFAULT_ROUTINES: Routine[] = [
     descripcion: "Nueva rutina · secuencia T1 → P1 → T2 → P2",
     dias: [
       { id: "tp-t1", titulo: "TORSO 1", subtitulo: "Pecho · Espalda · Hombro · Brazos", ejercicios: [
-        rx("tp-t1-inclinado", "Press Inclinado Mancuernas", 3, "6-10", "1-2"),
-        rx("tp-t1-jalon", "Jalón al Pecho Agarre Neutro", 3, "8-12", "1-2"),
-        rx("tp-t1-remo", "Remo T Pecho Apoyado", 3, "8-12", "1-2"),
-        rx("tp-t1-pecdeck", "Pec Deck", 3, "10-15", "1-2"),
-        rx("tp-t1-lateral", "Elevación Lateral Máquina", 3, "12-20", "1-2"),
-        rx("tp-t1-posterior", "Reverse Pec Deck", 2, "12-20", "1-2"),
-        rx("tp-t1-bayesiano", "Curl Bayesiano", 2, "8-12", "1-2"),
-        rx("tp-t1-triceps", "Tríceps Barra V", 2, "8-12", "1-2"),
+        rx("tp-t1-inclinado", "Press Inclinado con Mancuernas", 3, "6-10", "1-2"),
+        rx("tp-t1-jalon", "Jalón al Pecho Agarre Cerrado", 3, "8-12", "1-2"),
+        rx("tp-t1-pecdeck", "Pec Deck / Contractora", 3, "10-15", "1-2"),
+        rx("tp-t1-remo", "Remo T con Pecho Apoyado", 3, "8-12", "1-2"),
+        rx("tp-t1-lateral", "Elevaciones Laterales en Máquina", 3, "12-20", "1-2"),
+        rx("tp-t1-bayesiano", "Curl Bayesiano", 3, "8-12", "1-2"),
+        rx("tp-t1-posterior", "Deltoide Posterior en Máquina", 2, "12-20", "1-2"),
+        rx("tp-t1-triceps", "Tríceps con Barra V", 3, "8-12", "1-2"),
       ]},
       { id: "tp-p1", titulo: "PIERNA 1", subtitulo: "Cuádriceps · Glúteo · Femoral · Gemelo · Abdomen", ejercicios: [
         rx("tp-p1-hack", "Sentadilla Hack", 3, "6-10", "1-2"),
-        rx("tp-p1-prensa", "Prensa 45 Unilateral", 3, "8-12 por pierna", "1-2"),
-        rx("tp-p1-hip", "Hip Thrust Máquina", 3, "8-12", "1-2"),
         rx("tp-p1-curl", "Curl Femoral Tumbado", 3, "8-12", "1-2"),
+        rx("tp-p1-hip", "Hip Thrust Máquina", 3, "8-12", "1-2"),
+        rx("tp-p1-prensa", "Prensa 45 Unilateral", 3, "8-12 por pierna", "1-2"),
         rx("tp-p1-gemelo", "Gemelo Prensa", 3, "10-15", "1-2"),
         rx("tp-p1-crunch", "Crunch Cable", 3, "10-15", "1-2"),
       ]},
       { id: "tp-t2", titulo: "TORSO 2", subtitulo: "Espalda · Pecho · Hombro · Brazos", ejercicios: [
         rx("tp-t2-jalon", "Jalón al Pecho Agarre Ancho", 3, "8-12", "1-2"),
-        rx("tp-t2-remo", "Remo Máquina", 3, "8-12", "1-2"),
         rx("tp-t2-pecho", "Press Pecho Convergente", 3, "6-10", "1-2"),
+        rx("tp-t2-remo", "Remo Máquina", 3, "8-12", "1-2"),
         rx("tp-t2-cruce", "Cruce de Poleas Medio", 2, "10-15", "1-2"),
-        rx("tp-t2-hombro", "Press Hombro Mancuernas", 2, "8-12", "1-2"),
         rx("tp-t2-lateral", "Elevación Lateral Polea", 3, "12-20", "1-2"),
-        rx("tp-t2-predicador", "Curl Scott Máquina", 2, "8-12", "1-2"),
-        rx("tp-t2-frances", "Extensión Francesa Barra Z", 2, "8-12", "1-2"),
+        rx("tp-t2-predicador", "Curl Scott Máquina", 3, "8-12", "1-2"),
+        rx("tp-t2-hombro", "Press Hombro Mancuernas", 2, "8-12", "1-2"),
+        rx("tp-t2-frances", "Extensión Francesa Inclinada con Barra Z", 3, "8-12", "1-2"),
       ]},
       { id: "tp-p2", titulo: "PIERNA 2", subtitulo: "Femoral · Glúteo · Cuádriceps · Gemelo · Abdomen", ejercicios: [
         rx("tp-p2-rdl", "Peso Muerto Rumano Mancuernas", 3, "8-12", "2"),
-        rx("tp-p2-curl", "Curl Femoral Tumbado", 3, "8-12", "1-2"),
         rx("tp-p2-prensa", "Prensa 45 Bilateral", 3, "8-12", "1-2"),
+        rx("tp-p2-curl", "Curl Femoral Tumbado", 3, "8-12", "1-2"),
         rx("tp-p2-hip", "Hip Thrust Máquina", 3, "8-12", "1-2"),
         rx("tp-p2-extension", "Extensión de Cuádriceps", 3, "10-15", "1-2"),
         rx("tp-p2-gemelo", "Gemelo Prensa", 3, "10-15", "1-2"),
@@ -1707,7 +1707,7 @@ useEffect(() => {
         actual === "Remo Cable 1 Mano";
 
       if (esRemoCable1Mano) {
-        const preferida = biblioteca.find((x) => x.nombre === "Jalón al Pecho Agarre Neutro");
+        const preferida = biblioteca.find((x) => x.nombre === "Jalón al Pecho Agarre Cerrado");
         if (preferida) {
           return [preferida, ...mismoMusculo.filter((x) => x.id !== preferida.id)].slice(0, 18);
         }
