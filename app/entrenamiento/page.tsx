@@ -734,6 +734,16 @@ const compactarRegistros = (lista: Registro[]) => {
   }
   return Array.from(mejores.values());
 };
+
+// Une historial local + nube sin permitir que una copia antigua de Supabase
+// borre sesiones que ya existen en este dispositivo.
+const fusionarHistorial = (local: HistorialV2, nube: HistorialV2 | null | undefined): HistorialV2 => {
+  const salida: HistorialV2 = { ...local };
+  for (const [clave, listaNube] of Object.entries(nube ?? {})) {
+    salida[clave] = compactarRegistros([...(salida[clave] ?? []), ...(listaNube ?? [])]);
+  }
+  return salida;
+};
 const NUTRITION_ADMIN_ID = "95250377-5141-49fc-ae6c-27db3f25f9e3";
 const NUTRITION_PLAN_OWNER_ID = NUTRITION_ADMIN_ID;
 const NUTRITION_LABELS: Record<NutritionCategory, string> = {
@@ -876,7 +886,7 @@ const ultimoRegistroHistorial =
   const [inicioEntreno, setInicioEntreno] = useState<number | null>(null);
   const [progresoRutinas, setProgresoRutinas] = useState<Record<string, number>>({});
   const [notasEjercicio, setNotasEjercicio] = useState<Record<string, string>>({});
-  const [resumenFinal, setResumenFinal] = useState<{titulo:string; duracion:number; series:number; ejercicios:number; prs:number; siguiente:string} | null>(null);
+  const [resumenFinal, setResumenFinal] = useState<{titulo:string; duracion:number; series:number; ejercicios:number; prs:number; siguiente:string; textoCopiar:string} | null>(null);
   const [segundos, setSegundos] = useState(0);
   const [entrenoPausado, setEntrenoPausado] = useState(false);
   const [descansoRestante, setDescansoRestante] = useState(0);
@@ -904,6 +914,7 @@ const ultimoRegistroHistorial =
   const keyUsuario = (base: string) =>
   userId ? `${base}-${userId}` : base;
   const [nubeLista, setNubeLista] = useState(false);
+  const [datosLocalesCargados, setDatosLocalesCargados] = useState(false);
   const [anatomiaOverrides, setAnatomiaOverrides] = useState<Record<string, string>>({});
   const [editorAnatomiaId, setEditorAnatomiaId] = useState<string | null>(null);
   const [rutinaCompartida, setRutinaCompartida] = useState<Routine | null>(null);
@@ -966,6 +977,20 @@ const ultimoRegistroHistorial =
     return () => { document.body.style.overflow = overflowAnterior; };
   }, [splashVisible]);
 
+  // VitorFit ya está en español: evita que Chrome ofrezca traducir la app al entrar.
+  useEffect(() => {
+    if (typeof document === "undefined") return;
+    document.documentElement.lang = "es";
+    document.documentElement.setAttribute("translate", "no");
+    let meta = document.querySelector('meta[name="google"][content="notranslate"]') as HTMLMetaElement | null;
+    if (!meta) {
+      meta = document.createElement("meta");
+      meta.name = "google";
+      meta.content = "notranslate";
+      document.head.appendChild(meta);
+    }
+  }, []);
+
   const biblioteca = useMemo(() => [...BUILTIN_LIBRARY, ...bibliotecaPersonal], [bibliotecaPersonal]);
   const rutinaActual = rutinas.find((r) => r.id === rutinaActualId) ?? rutinas[0] ?? DEFAULT_ROUTINES[0];
   const diaActual = rutinaActual?.dias?.[diaActualIndex] ?? rutinaActual?.dias?.[0];
@@ -1008,7 +1033,16 @@ const ultimoRegistroHistorial =
       const nube = data?.data as any;
       if (nube) {
         if (nube.registros) setRegistros(nube.registros);
-        if (nube.historial) setHistorial(nube.historial);
+        if (nube.historial) {
+          // La nube nunca puede borrar un entrenamiento que ya exista en este dispositivo.
+          // Leemos también localStorage directamente para evitar carreras durante el arranque.
+          let localDispositivo: HistorialV2 = {};
+          try {
+            const rawLocal = localStorage.getItem(`${keyHistorial}-${session.user.id}`);
+            if (rawLocal) localDispositivo = JSON.parse(rawLocal);
+          } catch {}
+          setHistorial((local) => fusionarHistorial(fusionarHistorial(localDispositivo, local), nube.historial));
+        }
         if (nube.variantes) setVariantes(nube.variantes);
         if (nube.ajustes) setAjustes(nube.ajustes);
         if (nube.rutinas) setRutinas(fusionarRutinasBase(nube.rutinas));
@@ -1145,9 +1179,23 @@ const ultimoRegistroHistorial =
   const finalizarEntrenamiento = () => {
     if (inicioEntreno === null || !rutinaActual || !diaActual) return;
     const duracion = Math.max(0, Math.floor((Date.now() - inicioEntreno) / 1000));
-    const seriesHechas = Object.values(seriesConfirmadas).reduce((a,b)=>a+b,0);
-    const ejerciciosHechos = ejerciciosHoy.filter(e => (seriesConfirmadas[e.id] ?? 0) > 0).length;
     const hoyClave = claveDiaRegistro(new Date().toLocaleString("es-ES"));
+    const registroHoyDe = (ej: RoutineExercise) => {
+      const clave = claveHistorialEjercicio(ej);
+      const actual = nombreVariante(ej);
+      return [...compactarRegistros(historial[clave] ?? [])].reverse().find((r) =>
+        claveDiaRegistro(r.fecha) === hoyClave && (r.variante === actual || r.nombre === actual)
+      );
+    };
+    const ejerciciosCompletados = ejerciciosHoy.filter((ej) =>
+      Boolean(registroHoyDe(ej)) || (seriesConfirmadas[ej.id] ?? 0) > 0
+    );
+    const seriesHechas = ejerciciosCompletados.reduce((total, ej) => {
+      const guardado = registroHoyDe(ej);
+      if (guardado) return total + guardado.series.filter(s => s.kg || s.reps || s.rir).length;
+      return total + (seriesConfirmadas[ej.id] ?? 0);
+    }, 0);
+    const ejerciciosHechos = ejerciciosCompletados.length;
     const prs = ejerciciosHoy.reduce((total, ej) => {
       const clave = claveHistorialEjercicio(ej);
       const actual = nombreVariante(ej);
@@ -1163,8 +1211,84 @@ const ultimoRegistroHistorial =
     const hoy = claveFecha(new Date());
     setCalendario(prev => ({...prev, [hoy]: { rutinaId: rutinaActual.id, diaIndex: diaActualIndex, realizadoRutinaId: rutinaActual.id, realizadoDiaIndex: diaActualIndex, completado: true }}));
     setProgresoRutinas(prev => ({...prev, [rutinaActual.id]: siguienteIndex}));
+
+    // Creamos una copia legible de la sesión ANTES de limpiar series y alternativas.
+    // Así se puede pegar directamente en ChatGPT para revisar progresión, RIR y cargas.
+    const fechaSesion = new Date().toLocaleString("es-ES");
+    const lineasEjercicios = ejerciciosHoy
+      .filter((ej) => Boolean(registroHoyDe(ej)) || (seriesConfirmadas[ej.id] ?? 0) > 0)
+      .map((ej, index) => {
+        const registroGuardado = registroHoyDe(ej);
+        const cantidadConfirmada = registroGuardado?.series?.length || seriesConfirmadas[ej.id] || 0;
+        const varianteUsada = nombreVariante(ej);
+        const clave = claveHistorialEjercicio(ej);
+        const historialEj = compactarRegistros(historial[clave] ?? []);
+        const registroHoy = [...historialEj].reverse().find((r) =>
+          claveDiaRegistro(r.fecha) === hoyClave &&
+          (r.variante === varianteUsada || r.nombre === varianteUsada)
+        );
+        const seriesActuales = (registros[ej.id] ?? []).slice(0, cantidadConfirmada);
+        const seriesFuente = registroGuardado?.series?.length
+          ? registroGuardado.series
+          : (seriesActuales.some((s) => s.kg || s.reps || s.rir)
+              ? seriesActuales
+              : (registroHoy?.series ?? []).slice(0, cantidadConfirmada));
+        const detalle = seriesFuente.map((s, i) =>
+          `  S${i + 1}: ${s.kg || "—"} kg × ${s.reps || "—"} reps · RIR ${s.rir || "—"}`
+        ).join("\n");
+        const nota = (notasEjercicio[ej.id] || "").trim();
+        const esAlternativa = varianteUsada !== ej.nombre;
+        return `${index + 1}. ${varianteUsada}${esAlternativa ? ` (alternativa de ${ej.nombre})` : ""}\n${detalle}${nota ? `\n  Nota: ${nota}` : ""}`;
+      })
+      .join("\n\n");
+
+    const textoCopiar = [
+      "VITORFIT — SESIÓN COMPLETADA",
+      `Fecha: ${fechaSesion}`,
+      `Rutina: ${rutinaActual.nombre}`,
+      `Día: ${diaActual.titulo}`,
+      `Duración: ${formatoTiempo(duracion)}`,
+      `Series completadas: ${seriesHechas}`,
+      `Ejercicios realizados: ${ejerciciosHechos}`,
+      `PR: ${prs}`,
+      "",
+      lineasEjercicios || "Sin series registradas.",
+      "",
+      `Próximo entrenamiento: ${siguiente}`,
+    ].join("\n");
+
+    // Copia permanente de emergencia de la sesión completa antes de limpiar estados temporales.
+    // Permite recuperar el texto incluso si la nube falla.
+    if (userId && typeof window !== "undefined") {
+      const claveSesiones = keyUsuario("vitorfit-sesiones-finalizadas-v1");
+      try {
+        const prev = JSON.parse(localStorage.getItem(claveSesiones) || "[]");
+        const sesion = {
+          id: `${Date.now()}-${rutinaActual.id}-${diaActual.id}`,
+          fecha: fechaSesion,
+          diaClave: hoyClave,
+          rutinaId: rutinaActual.id,
+          rutina: rutinaActual.nombre,
+          diaId: diaActual.id,
+          dia: diaActual.titulo,
+          duracion,
+          series: seriesHechas,
+          ejercicios: ejerciciosHechos,
+          prs,
+          siguiente,
+          textoCopiar,
+          // Copia estructurada del historial en el instante de finalizar.
+          // Sirve como segunda red de seguridad además de vitorfit-historial-v2.
+          historialSnapshot: clone(historial),
+        };
+        localStorage.setItem(claveSesiones, JSON.stringify([sesion, ...prev.filter((x:any) => x?.diaClave !== hoyClave)].slice(0, 100)));
+      } catch (error) {
+        console.error("VitorFit: no se pudo crear la copia local final", error);
+      }
+    }
+
+    setResumenFinal({titulo: diaActual.titulo, duracion, series: seriesHechas, ejercicios: ejerciciosHechos, prs, siguiente, textoCopiar});
     setDiaActualIndex(siguienteIndex);
-    setResumenFinal({titulo: diaActual.titulo, duracion, series: seriesHechas, ejercicios: ejerciciosHechos, prs, siguiente});
     setInicioEntreno(null); setSegundos(0); setEntrenoPausado(false);
     setSeriesConfirmadas({}); setSeriesSesion({}); setExtrasSesion([]);
     // Las alternativas son elecciones de ESA sesión. Al finalizar, cada hueco
@@ -1271,9 +1395,23 @@ const ultimoRegistroHistorial =
     const aw = localStorage.getItem(keyUsuario(keyActiveWorkout));
     const rp = localStorage.getItem(keyUsuario(keyRoutineProgress));
     const en = localStorage.getItem(keyUsuario(keyExerciseNotes));
+    const sf = localStorage.getItem(keyUsuario("vitorfit-sesiones-finalizadas-v1"));
 
     if (r) setRegistros(JSON.parse(r));
-    if (h) setHistorial(JSON.parse(h));
+    let historialLocal: HistorialV2 = h ? JSON.parse(h) : {};
+    // Segunda red de seguridad: si una versión anterior llegó a pisar el historial,
+    // reconstruimos lo que podamos desde las copias de sesiones finalizadas.
+    if (sf) {
+      try {
+        const sesiones = JSON.parse(sf);
+        if (Array.isArray(sesiones)) {
+          for (const sesion of sesiones) {
+            if (sesion?.historialSnapshot) historialLocal = fusionarHistorial(historialLocal, sesion.historialSnapshot);
+          }
+        }
+      } catch {}
+    }
+    setHistorial(historialLocal);
     if (v) setVariantes(JSON.parse(v));
     if (a) setAjustes(JSON.parse(a));
     if (rr) setRutinas(fusionarRutinasBase(JSON.parse(rr)));
@@ -1304,67 +1442,78 @@ const ultimoRegistroHistorial =
     setMensaje(
       "No pude leer los datos locales de este usuario, pero VitorFit puede seguir funcionando."
     );
+  } finally {
+    // MUY IMPORTANTE: hasta este punto ningún efecto de guardado puede escribir.
+    // Evita que el primer render ({}) pise el historial local antes de recuperarlo.
+    setDatosLocalesCargados(true);
   }
 }, [userId]);
 
  useEffect(() => {
-  if (!userId) return;
+  if (!userId || !datosLocalesCargados) return;
   localStorage.setItem(keyUsuario(keyRegistros), JSON.stringify(registros));
-}, [userId, registros]);
+}, [userId, datosLocalesCargados, registros]);
+
+// El historial local es la copia principal de seguridad. Se escribe siempre,
+// independientemente de que Supabase esté disponible o devuelva 401.
+useEffect(() => {
+  if (!userId || !datosLocalesCargados) return;
+  localStorage.setItem(keyUsuario(keyHistorial), JSON.stringify(historial));
+}, [userId, datosLocalesCargados, historial]);
 
 useEffect(() => {
-  if (!userId) return;
+  if (!userId || !datosLocalesCargados) return;
   localStorage.setItem(keyUsuario(keyVariantes), JSON.stringify(variantes));
-}, [userId, variantes]);
+}, [userId, datosLocalesCargados, variantes]);
 
 useEffect(() => {
-  if (!userId) return;
+  if (!userId || !datosLocalesCargados) return;
   localStorage.setItem(keyUsuario(keyAjustes), JSON.stringify(ajustes));
-}, [userId, ajustes]);
+}, [userId, datosLocalesCargados, ajustes]);
 
 useEffect(() => {
-  if (!userId) return;
+  if (!userId || !datosLocalesCargados) return;
   localStorage.setItem(keyUsuario(keyRutinas), JSON.stringify(rutinas));
-}, [userId, rutinas]);
+}, [userId, datosLocalesCargados, rutinas]);
 
 useEffect(() => {
-  if (!userId) return;
+  if (!userId || !datosLocalesCargados) return;
   localStorage.setItem(
     keyUsuario(keyCustomLibrary),
     JSON.stringify(bibliotecaPersonal)
   );
-}, [userId, bibliotecaPersonal]);
+}, [userId, datosLocalesCargados, bibliotecaPersonal]);
 
 useEffect(() => {
-  if (!userId) return;
+  if (!userId || !datosLocalesCargados) return;
   localStorage.setItem(
     keyUsuario(keyRoutineSelection),
     JSON.stringify({ rutinaActualId, diaActualIndex })
   );
-}, [userId, rutinaActualId, diaActualIndex]);
+}, [userId, datosLocalesCargados, rutinaActualId, diaActualIndex]);
 
 useEffect(() => {
-  if (!userId) return;
+  if (!userId || !datosLocalesCargados) return;
   localStorage.setItem(keyUsuario(keyCalendario), JSON.stringify(calendario));
-}, [userId, calendario]);
+}, [userId, datosLocalesCargados, calendario]);
 
 useEffect(() => {
-  if (!userId) return;
+  if (!userId || !datosLocalesCargados) return;
   localStorage.setItem(keyUsuario(keyCreatina), JSON.stringify(creatina));
-}, [userId, creatina]);
+}, [userId, datosLocalesCargados, creatina]);
 
 useEffect(() => {
-  if (!userId) return;
+  if (!userId || !datosLocalesCargados) return;
   localStorage.setItem(keyUsuario(keySeriesConfirmadas), JSON.stringify(seriesConfirmadas));
-}, [userId, seriesConfirmadas]);
+}, [userId, datosLocalesCargados, seriesConfirmadas]);
 
 useEffect(() => {
-  if (!userId) return;
+  if (!userId || !datosLocalesCargados) return;
   localStorage.setItem(keyUsuario(keyExtrasSesion), JSON.stringify(extrasSesion));
-}, [userId, extrasSesion]);
+}, [userId, datosLocalesCargados, extrasSesion]);
 
-useEffect(() => { if (!userId) return; localStorage.setItem(keyUsuario(keyRoutineProgress), JSON.stringify(progresoRutinas)); }, [userId, progresoRutinas]);
-useEffect(() => { if (!userId) return; localStorage.setItem(keyUsuario(keyExerciseNotes), JSON.stringify(notasEjercicio)); }, [userId, notasEjercicio]);
+useEffect(() => { if (!userId || !datosLocalesCargados) return; localStorage.setItem(keyUsuario(keyRoutineProgress), JSON.stringify(progresoRutinas)); }, [userId, datosLocalesCargados, progresoRutinas]);
+useEffect(() => { if (!userId || !datosLocalesCargados) return; localStorage.setItem(keyUsuario(keyExerciseNotes), JSON.stringify(notasEjercicio)); }, [userId, datosLocalesCargados, notasEjercicio]);
 
 // Los ejercicios EXTRA pertenecen únicamente al día de entrenamiento actual.
 // Al cambiar de día o de rutina se eliminan de la sesión, sin tocar la rutina base.
@@ -1373,16 +1522,16 @@ useEffect(() => {
 }, [rutinaActualId, diaActualIndex]);
 
 useEffect(() => {
-  if (!userId) return;
+  if (!userId || !datosLocalesCargados) return;
   localStorage.setItem(
     keyUsuario(keyAnatomiaOverrides),
     JSON.stringify(anatomiaOverrides)
   );
-}, [userId, anatomiaOverrides]);
+}, [userId, datosLocalesCargados, anatomiaOverrides]);
   // Mantiene una copia en Supabase separada por usuario. Espera a terminar la carga
   // inicial para no sobrescribir accidentalmente datos existentes con valores vacíos.
   useEffect(() => {
-    if (!userId || !nubeLista) return;
+    if (!userId || !nubeLista || !datosLocalesCargados) return;
 
     const timer = window.setTimeout(async () => {
       const data = {
@@ -1411,12 +1560,16 @@ useEffect(() => {
 
       if (error) {
         console.error("VitorFit: no se pudo guardar en Supabase", error);
+        localStorage.setItem(keyUsuario("vitorfit-nube-pendiente-v1"), "1");
+        setMensaje("☁️ Nube pendiente de sincronizar. El entrenamiento sigue guardado en este dispositivo.");
+      } else {
+        localStorage.removeItem(keyUsuario("vitorfit-nube-pendiente-v1"));
       }
     }, 600);
 
     return () => window.clearTimeout(timer);
   }, [
-    userId, nubeLista, registros, historial, variantes, ajustes, rutinas,
+    userId, nubeLista, datosLocalesCargados, registros, historial, variantes, ajustes, rutinas,
     bibliotecaPersonal, rutinaActualId, diaActualIndex, calendario, creatina, anatomiaOverrides, extrasSesion, progresoRutinas, notasEjercicio, supabase,
   ]);
 
@@ -2903,13 +3056,111 @@ const planificarFecha = (fecha: Date) => {
   }) => {
     const override = id ? anatomiaOverrides[id] : "";
     const src = override ? `/anatomia/${override}.png` : imagenAnatomia(musculo, patron, nombre);
-    return (
+
+  return (
       <div className={`vf-anatomia-pro ${compact ? "compact" : ""}`} title={`Zona principal: ${musculo}`}>
         <img src={src} alt={`Anatomía: ${musculo}`} loading="lazy" />
         {!compact && <span>{musculo}</span>}
       </div>
     );
   };
+
+  const eliminarEntrenamientoHistorial = (fechaReferencia: string) => {
+    const diaClave = claveDiaRegistro(fechaReferencia);
+    const registrosDelDia = Object.values(historial)
+      .flatMap((lista) => compactarRegistros(lista ?? []))
+      .filter((r) => claveDiaRegistro(r.fecha) === diaClave);
+
+    if (!registrosDelDia.length) {
+      setMensaje("⚠️ No encontré ningún entrenamiento guardado para ese día.");
+      return;
+    }
+
+    const fechaBonita = registrosDelDia[0]?.fecha?.split(",")[0] || fechaReferencia;
+    const confirmar = window.confirm(
+      `¿Eliminar el entrenamiento del ${fechaBonita}?\n\nSe borrarán todos los ejercicios guardados de ese día. Esta acción no se puede deshacer.`
+    );
+    if (!confirmar) return;
+
+    const nuevoHistorial: HistorialV2 = {};
+    for (const [clave, lista] of Object.entries(historial)) {
+      const filtrada = compactarRegistros(lista ?? []).filter(
+        (r) => claveDiaRegistro(r.fecha) !== diaClave
+      );
+      if (filtrada.length) nuevoHistorial[clave] = filtrada;
+    }
+
+    // 1) Borra de la fuente local principal.
+    setHistorial(nuevoHistorial);
+    if (userId && typeof window !== "undefined") {
+      localStorage.setItem(keyUsuario(keyHistorial), JSON.stringify(nuevoHistorial));
+
+      // 2) Borra también la copia de emergencia para que el entrenamiento
+      //    eliminado no reaparezca al recargar VitorFit.
+      const claveSesiones = keyUsuario("vitorfit-sesiones-finalizadas-v1");
+      try {
+        const sesiones = JSON.parse(localStorage.getItem(claveSesiones) || "[]");
+        if (Array.isArray(sesiones)) {
+          localStorage.setItem(
+            claveSesiones,
+            JSON.stringify(sesiones.filter((sesion: any) => sesion?.diaClave !== diaClave))
+          );
+        }
+      } catch {}
+    }
+
+    // 3) Si ese día estaba marcado como entrenamiento completado, lo retiramos
+    //    también del calendario para que las estadísticas no cuenten una sesión borrada.
+    setCalendario((prev) => {
+      if (!prev[diaClave]) return prev;
+      const next = { ...prev };
+      delete next[diaClave];
+      return next;
+    });
+
+    setMensaje(`🗑️ Entrenamiento del ${fechaBonita} eliminado.`);
+  };
+
+  const copiarEntrenamientoHistorial = async (fechaReferencia: string) => {
+    const diaClave = claveDiaRegistro(fechaReferencia);
+    const ejerciciosDelDia = Object.entries(historial)
+      .flatMap(([ejId, lista]) => compactarRegistros(lista ?? []).map(r => ({ ejId, r })))
+      .filter(({ r }) => claveDiaRegistro(r.fecha) === diaClave)
+      .sort((a, b) => a.r.fecha.localeCompare(b.r.fecha));
+
+    if (!ejerciciosDelDia.length) {
+      setMensaje("⚠️ No encontré ejercicios guardados para ese día.");
+      return;
+    }
+
+    const fechaBonita = ejerciciosDelDia[0]?.r.fecha?.split(",")[0] || fechaReferencia;
+    const totalSeries = ejerciciosDelDia.reduce((acc, { r }) => acc + r.series.filter(s => s.kg || s.reps || s.rir).length, 0);
+    const bloques = ejerciciosDelDia.map(({ r }, index) => {
+      const detalle = r.series.map((serie, i) =>
+        `  S${i + 1}: ${serie.kg || "—"} kg × ${serie.reps || "—"} reps · RIR ${serie.rir || "—"}`
+      ).join("\n");
+      return `${index + 1}. ${r.variante || r.nombre || "Ejercicio"}\n${detalle}`;
+    }).join("\n\n");
+
+    const texto = [
+      "VITORFIT — ENTRENAMIENTO DESDE HISTORIAL",
+      `Fecha: ${fechaBonita}`,
+      `Ejercicios guardados: ${ejerciciosDelDia.length}`,
+      `Series guardadas: ${totalSeries}`,
+      "",
+      bloques,
+      "",
+      "Analiza mi entrenamiento: cargas, repeticiones, RIR, caída de rendimiento entre series y qué debería mantener o subir la próxima sesión."
+    ].join("\n");
+
+    try {
+      await navigator.clipboard.writeText(texto);
+      setMensaje(`📋 Entrenamiento del ${fechaBonita} copiado. Ya puedes pegarlo en ChatGPT.`);
+    } catch {
+      setMensaje("⚠️ No se pudo copiar automáticamente. Revisa los permisos del portapapeles.");
+    }
+  };
+
 
   const editorRutina = rutinas.find((r) => r.id === editorRutinaId) ?? null;
   const editorDia = editorRutina?.dias.find((d) => d.id === editorDiaId) ?? editorRutina?.dias[0] ?? null;
@@ -3239,7 +3490,7 @@ linear-gradient(180deg,rgba(18,12,15,.97),rgba(11,12,15,.98));backdrop-filter:bl
           <a className="vf-home" href="/">← Volver al inicio</a>
         </>}
 
-          {resumenFinal&&<section className="vf-section-card" style={{border:"2px solid #D94B55",textAlign:"center"}}><h2 style={{marginTop:0}}>✅ {resumenFinal.titulo} COMPLETADO</h2><div style={{fontSize:18,fontWeight:800}}>{formatoTiempo(resumenFinal.duracion)} · {resumenFinal.series} series · {resumenFinal.prs} PR · {resumenFinal.ejercicios}/{diaActual?.ejercicios.length ?? resumenFinal.ejercicios} ejercicios</div><div className="vf-muted" style={{marginTop:8}}>Próximo entrenamiento: <strong>{resumenFinal.siguiente}</strong></div><button className="vf-primary" style={{marginTop:12}} onClick={()=>setResumenFinal(null)}>CERRAR RESUMEN</button></section>}
+          {resumenFinal&&<section className="vf-section-card" style={{border:"2px solid #D94B55",textAlign:"center"}}><h2 style={{marginTop:0}}>✅ {resumenFinal.titulo} COMPLETADO</h2><div style={{fontSize:18,fontWeight:800}}>{formatoTiempo(resumenFinal.duracion)} · {resumenFinal.series} series · {resumenFinal.prs} PR · {resumenFinal.ejercicios} ejercicios</div><div className="vf-muted" style={{marginTop:8}}>Próximo entrenamiento: <strong>{resumenFinal.siguiente}</strong></div><button className="vf-primary" style={{marginTop:12}} onClick={async()=>{try{await navigator.clipboard.writeText(resumenFinal.textoCopiar);setMensaje("📋 Entrenamiento copiado. Ya puedes pegarlo en ChatGPT.");}catch{setMensaje("⚠️ No se pudo copiar automáticamente. Revisa los permisos del portapapeles.");}}}>📋 COPIAR ENTRENAMIENTO</button><button className="vf-secondary" style={{marginTop:8}} onClick={()=>setResumenFinal(null)}>CERRAR RESUMEN</button></section>}
 
         {vista==="historial"&&<><h1 className="vf-page-title">📚 HISTORIAL</h1>{Object.entries(historial)
   .flatMap(([ejId, registrosEj]) => {
@@ -3255,7 +3506,7 @@ linear-gradient(180deg,rgba(18,12,15,.97),rgba(11,12,15,.98));backdrop-filter:bl
     };
     return fechaMs(b.r.fecha) - fechaMs(a.r.fecha);
   })
-  .map(({ejId,ej,r},i)=><section className="vf-section-card" key={`${ejId}-${r.fecha}-${i}`}><div className="vf-history-name">{ej?.nombre??r.nombre??"Ejercicio"}</div><div className="vf-muted">{ej?.patron??r.patron??"—"} · {r.fecha}</div><div className="vf-history-ex"><div><strong>{r.variante}</strong><div className="vf-mini-series">{r.series.map((s,si)=><span className="vf-mini-chip" key={si}>S{si+1}: {s.kg||"—"}kg · {s.reps||"—"} reps · RIR {s.rir||"—"}</span>)}</div></div>{ej?.musculo&&<span className="vf-tag">{ej.musculo}</span>}</div></section>)}{Object.values(historial).every(lista=>!lista?.length)&&<div className="vf-section-card">Todavía no hay entrenamientos guardados.</div>}</>}
+  .map(({ejId,ej,r},i)=><section className="vf-section-card" key={`${ejId}-${r.fecha}-${i}`}><div className="vf-history-name">{ej?.nombre??r.nombre??"Ejercicio"}</div><div className="vf-muted">{ej?.patron??r.patron??"—"} · {r.fecha}</div><div className="vf-history-ex"><div><strong>{r.variante}</strong><div className="vf-mini-series">{r.series.map((s,si)=><span className="vf-mini-chip" key={si}>S{si+1}: {s.kg||"—"}kg · {s.reps||"—"} reps · RIR {s.rir||"—"}</span>)}</div></div>{ej?.musculo&&<span className="vf-tag">{ej.musculo}</span>}</div><div style={{display:"flex",gap:10,flexWrap:"wrap",marginTop:12}}><button className="vf-secondary" onClick={()=>copiarEntrenamientoHistorial(r.fecha)}>📋 COPIAR ENTRENAMIENTO DE ESTE DÍA</button><button className="vf-secondary" style={{borderColor:"#7f1d1d",color:"#fca5a5"}} onClick={()=>eliminarEntrenamientoHistorial(r.fecha)}>🗑️ ELIMINAR ENTRENAMIENTO</button></div></section>)}{Object.values(historial).every(lista=>!lista?.length)&&<div className="vf-section-card">Todavía no hay entrenamientos guardados.</div>}</>}
 
 {vista==="progreso"&&<><h1 className="vf-page-title">📈 PROGRESO Y RÉCORDS</h1><div className="vf-progress-grid">{progreso.filter(p=>p.sesiones>0).map((p,i)=><div className="vf-record" key={`${p.rutina}-${p.dia}-${p.nombre}-${i}`}><div className="vf-muted">{p.rutina} · {p.dia}</div><h3>{p.nombre}</h3><div className="vf-record-big">{p.mejorKg?`${p.mejorKg} KG`:"—"}</div><div className="vf-muted">Récord de peso</div><div style={{marginTop:10}}><strong>🏆 Mejor serie:</strong> {p.mejorTexto}</div><div className="vf-muted">e1RM aprox.: {p.mejorE1rm?`${p.mejorE1rm.toFixed(1)} kg`:"—"}</div><div style={{marginTop:8,color:"#D94B55",fontWeight:900}}>Tendencia: {p.tendencia}</div><div className="vf-muted">{p.sesiones} sesiones guardadas</div></div>)}</div>{progreso.every(p=>p.sesiones===0)&&<div className="vf-section-card">Guarda entrenamientos y aquí aparecerán tus récords y evolución automáticamente.</div>}</>}
 
