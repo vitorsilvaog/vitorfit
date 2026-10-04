@@ -640,9 +640,17 @@ const DEFAULT_ROUTINES: Routine[] = [
   },
   {
     id: "rutina-torso-pierna-2026",
-    nombre: "Torso / Pierna 4 días",
-    descripcion: "Nueva rutina · secuencia T1 → P1 → T2 → P2",
+    nombre: "Pierna / Torso 4 días",
+    descripcion: "Rutina actualizada · secuencia P1 → T1 → P2 → T2",
     dias: [
+      { id: "tp-p1", titulo: "PIERNA 1", subtitulo: "Cuádriceps · Aductores · Gemelo · Abdomen", ejercicios: [
+        rx("tp-p1-hack", "Sentadilla Hack", 3, "6-10", "1-2"),
+        rx("tp-p1-prensa", "Prensa 45", 3, "8-12", "1-2"),
+        rx("tp-p1-extension", "Extensión de Cuádriceps", 3, "10-15", "1-2"),
+        rx("tp-p1-aductor", "Aductor Máquina", 3, "12-20", "1-2"),
+        rx("tp-p1-gemelo", "Gemelo Prensa", 3, "10-15", "1-2"),
+        rx("tp-p1-crunch", "Crunch Cable", 3, "10-15", "1-2"),
+      ]},
       { id: "tp-t1", titulo: "TORSO 1", subtitulo: "Pecho · Espalda · Hombro · Brazos", ejercicios: [
         rx("tp-t1-inclinado", "Press Inclinado con Mancuernas", 3, "6-10", "1-2"),
         rx("tp-t1-jalon", "Jalón al Pecho Agarre Cerrado", 3, "8-12", "1-2"),
@@ -653,13 +661,14 @@ const DEFAULT_ROUTINES: Routine[] = [
         rx("tp-t1-posterior", "Deltoide Posterior en Máquina", 2, "12-20", "1-2"),
         rx("tp-t1-triceps", "Tríceps con Barra V", 3, "8-12", "1-2"),
       ]},
-      { id: "tp-p1", titulo: "PIERNA 1", subtitulo: "Cuádriceps · Glúteo · Femoral · Gemelo · Abdomen", ejercicios: [
-        rx("tp-p1-hack", "Sentadilla Hack", 3, "6-10", "1-2"),
-        rx("tp-p1-curl", "Curl Femoral Tumbado", 3, "8-12", "1-2"),
-        rx("tp-p1-hip", "Hip Thrust Máquina", 3, "8-12", "1-2"),
-        rx("tp-p1-prensa", "Prensa 45 Unilateral", 3, "8-12 por pierna", "1-2"),
-        rx("tp-p1-gemelo", "Gemelo Prensa", 3, "10-15", "1-2"),
-        rx("tp-p1-crunch", "Crunch Cable", 3, "10-15", "1-2"),
+      { id: "tp-p2", titulo: "PIERNA 2", subtitulo: "Femoral · Glúteo · Abductores · Gemelo · Abdomen", ejercicios: [
+        rx("tp-p2-rdl", "Peso Muerto Rumano Mancuernas", 3, "8-12", "1-2"),
+        rx("tp-p2-bulgara", "Búlgara Énfasis Glúteo", 3, "8-12 por pierna", "1-2"),
+        rx("tp-p2-hip", "Hip Thrust Máquina", 3, "8-12", "1-2"),
+        rx("tp-p2-curl", "Curl Femoral Tumbado", 3, "8-12", "1-2"),
+        rx("tp-p2-abductor", "Abductor Máquina", 3, "12-20", "1-2"),
+        rx("tp-p2-gemelo", "Gemelo Prensa", 3, "10-15", "1-2"),
+        rx("tp-p2-crunch", "Crunch Cable", 3, "10-15", "1-2"),
       ]},
       { id: "tp-t2", titulo: "TORSO 2", subtitulo: "Espalda · Pecho · Hombro · Brazos", ejercicios: [
         rx("tp-t2-jalon", "Jalón al Pecho Agarre Ancho", 3, "8-12", "1-2"),
@@ -670,15 +679,6 @@ const DEFAULT_ROUTINES: Routine[] = [
         rx("tp-t2-predicador", "Curl Scott Máquina", 3, "8-12", "1-2"),
         rx("tp-t2-hombro", "Press Hombro Mancuernas", 2, "8-12", "1-2"),
         rx("tp-t2-frances", "Extensión Francesa Inclinada con Barra Z", 3, "8-12", "1-2"),
-      ]},
-      { id: "tp-p2", titulo: "PIERNA 2", subtitulo: "Femoral · Glúteo · Cuádriceps · Gemelo · Abdomen", ejercicios: [
-        rx("tp-p2-rdl", "Peso Muerto Rumano Mancuernas", 3, "8-12", "2"),
-        rx("tp-p2-prensa", "Prensa 45 Bilateral", 3, "8-12", "1-2"),
-        rx("tp-p2-curl", "Curl Femoral Tumbado", 3, "8-12", "1-2"),
-        rx("tp-p2-hip", "Hip Thrust Máquina", 3, "8-12", "1-2"),
-        rx("tp-p2-extension", "Extensión de Cuádriceps", 3, "10-15", "1-2"),
-        rx("tp-p2-gemelo", "Gemelo Prensa", 3, "10-15", "1-2"),
-        rx("tp-p2-crunch", "Crunch Cable", 3, "10-15", "1-2"),
       ]},
     ],
   },
